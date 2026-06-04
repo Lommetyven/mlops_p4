@@ -1,0 +1,6 @@
+data:
+  input_path: "data/raw/household_power_consumption.txt"                            # Path to the dataset
+  fill_missing: "drop"                                                              # Metod to fill the missing values (drop, ffill, bfil)
+  time_interval: "1h"                                                               # The set time interval for aggragation and prediction example: 1h, 10min, 30min
+
+  

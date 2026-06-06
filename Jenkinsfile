@@ -32,6 +32,21 @@ pipeline {
             defaultValue: true,
             description: 'Upload raw, processed, and model files under readable_artifacts/.'
         )
+        password(
+            name: 'MINIO_ACCESS_KEY',
+            defaultValue: '',
+            description: 'MinIO access key used by DVC. Required unless .dvc/config.local already has credentials.'
+        )
+        password(
+            name: 'MINIO_SECRET_KEY',
+            defaultValue: '',
+            description: 'MinIO secret key used by DVC. Required unless .dvc/config.local already has credentials.'
+        )
+        password(
+            name: 'WANDB_API_KEY',
+            defaultValue: '',
+            description: 'Weights & Biases API key. Required unless the Jenkins node is already logged in to W&B.'
+        )
     }
 
     environment {
@@ -94,21 +109,24 @@ pipeline {
                 }
             }
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'minio-energyconsumption',
-                        usernameVariable: 'MINIO_ACCESS_KEY',
-                        passwordVariable: 'MINIO_SECRET_KEY'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
+                sh '''
+                    set -eu
+
+                    if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" access_key_id "$MINIO_ACCESS_KEY"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" secret_access_key "$MINIO_SECRET_KEY"
-                        .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" endpointurl "$AWS_ENDPOINT_URL"
-                        .venv/bin/python -m dvc remote list
-                    '''
-                }
+                    elif [ -f .dvc/config.local ] \
+                        && grep -q "access_key_id" .dvc/config.local \
+                        && grep -q "secret_access_key" .dvc/config.local; then
+                        echo "Using existing .dvc/config.local MinIO credentials."
+                    else
+                        echo "MINIO_ACCESS_KEY and MINIO_SECRET_KEY password parameters are required unless .dvc/config.local already has credentials." >&2
+                        exit 1
+                    fi
+
+                    .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" endpointurl "$AWS_ENDPOINT_URL"
+                    .venv/bin/python -m dvc remote list
+                '''
             }
         }
 
@@ -150,21 +168,22 @@ pipeline {
                 expression { return params.RUN_TRAINING }
             }
             steps {
-                withCredentials([
-                    string(credentialsId: 'wandb-api-key', variable: 'WANDB_API_KEY')
-                ]) {
-                    sh '''
-                        set -eu
-                        mkdir -p reports
+                sh '''
+                    set -eu
+                    mkdir -p reports
 
-                        if ! command -v sbatch >/dev/null 2>&1; then
-                            echo "sbatch is required on this Jenkins agent to submit scripts/train_mode.sh" >&2
-                            exit 1
-                        fi
+                    if [ -z "${WANDB_API_KEY:-}" ] && [ ! -f "$HOME/.netrc" ]; then
+                        echo "WANDB_API_KEY password parameter is required when RUN_TRAINING=true unless the node is already logged in to W&B." >&2
+                        exit 1
+                    fi
 
-                        sbatch --wait --export=ALL scripts/train_mode.sh
-                    '''
-                }
+                    if ! command -v sbatch >/dev/null 2>&1; then
+                        echo "sbatch is required on this Jenkins agent to submit scripts/train_mode.sh" >&2
+                        exit 1
+                    fi
+
+                    sbatch --wait --export=ALL scripts/train_mode.sh
+                '''
             }
         }
 

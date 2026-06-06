@@ -1,0 +1,81 @@
+model:
+  input_size: 16
+  hidden_size: 800
+  num_layers: 1
+  output_size: 1
+
+experiment:
+  model_version: "gru-1.0.0"
+
+task:
+  type: "regression"
+  class_names: null
+  positive_class_threshold: 0.5
+
+data:
+  processed_path: "data/processed/household_power_gru.csv"
+  feature_columns:
+    - "Global_active_power"
+    - "Global_reactive_power"
+    - "Voltage"
+    - "Global_intensity"
+    - "Sub_metering_1"
+    - "Sub_metering_2"
+    - "Sub_metering_3"
+    - "hour"
+    - "day_of_week"
+    - "month"
+    - "hour_sin"
+    - "hour_cos"
+    - "dow_sin"
+    - "dow_cos"
+    - "month_sin"
+    - "month_cos"
+  target_column: "target_next_hour"
+
+training:
+  epochs: 50
+  batch_size: 32
+  sequence_length: 12
+  learning_rate: 0.001
+  weight_decay: 0.0
+  optimizer: "adam"
+  loss: "mse"
+  gradient_clip_norm: 1.0
+  validation_split: 0.2
+  test_split: 0.1
+  shuffle: true
+  num_workers: 0
+  seed: 42
+  device: "auto"
+
+checkpoint:
+  output_path: "models/gru_model.pt"
+  save_best_only: true
+
+monitoring:
+  enabled: true
+  config_path: "configs/monitering_config.yaml"
+
+data_versioning:
+  enabled: true
+  artifact_name: "household-power-gru"
+  artifact_type: "dataset"
+  upload_dataset: false
+  aliases:
+    - "latest"
+
+carbon_tracking:
+  enabled: false
+  log_dir: "reports/carbontracker"
+  log_file_prefix: "training"
+  epochs_before_pred: 1
+  monitor_epochs: -1
+  update_interval: 1
+  interpretable: true
+  stop_and_confirm: false
+  ignore_errors: true
+  components: "all"
+  devices_by_pid: false
+  verbose: 1
+  decimal_precision: 12

@@ -1,4 +1,54 @@
+# Python
 __pycache__/
 *.py[cod]
 
+# Virtual envs
+.venv/
+venv/
+env/
+mlops/
+MLOps/
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff and pre-commit
+.ruff_cache/
+.pre-commit-cache*/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# WandB and generated reports
+wandb/
+reports/
+requirements/
+
+# DVC local state
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+
+# DVC-tracked data artifacts
 data/**
+
+# Local configs
+configs/local_run_config.yaml
+configs/local_run_monitoring_config.yaml
+
+# Temp
+tmp/
+*.tmp
+
+# Models
+models/**/*.pt
+models/**/*.pth
+models/**/*.pkl
+models/**/*.joblib

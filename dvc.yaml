@@ -1,0 +1,33 @@
+stages:
+  archive_raw:
+    cmd: python scripts/archive_paths.py pack --source data/raw --output data/dvc_archives/raw.tar.gz
+    deps:
+      - data/raw
+      - scripts/archive_paths.py
+    outs:
+      - data/dvc_archives/raw.tar.gz
+
+  process_data:
+    cmd: python data_insight/process_data.py --config configs/data_config.yaml
+    deps:
+      - configs/data_config.yaml
+      - data/raw/household_power_consumption.txt
+      - data_insight/process_data.py
+    outs:
+      - data/processed/household_power_gru.csv
+
+  archive_processed:
+    cmd: python scripts/archive_paths.py pack --source data/processed --output data/dvc_archives/processed.tar.gz
+    deps:
+      - data/processed/household_power_gru.csv
+      - scripts/archive_paths.py
+    outs:
+      - data/dvc_archives/processed.tar.gz
+
+  archive_models:
+    cmd: python scripts/archive_paths.py pack --source models --output data/dvc_archives/models.tar.gz --allow-empty
+    deps:
+      - models
+      - scripts/archive_paths.py
+    outs:
+      - data/dvc_archives/models.tar.gz

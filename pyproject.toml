@@ -1,0 +1,41 @@
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+extend-exclude = [
+    ".pre-commit-cache*",
+    ".pytest_cache",
+    "data_insight/*.ipynb",
+    "mlops/**",
+    "requirements/**",
+    "tmp/**",
+    "wandb/**",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "W",
+]
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+norecursedirs = [
+    ".git",
+    ".pre-commit-cache*",
+    ".pytest_cache",
+    ".ruff_cache",
+    "data",
+    "mlops",
+    "models",
+    "reports",
+    "requirements",
+    "tmp",
+    "wandb",
+]

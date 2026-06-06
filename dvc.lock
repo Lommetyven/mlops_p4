@@ -1,0 +1,75 @@
+schema: '2.0'
+stages:
+  archive_raw:
+    cmd: python scripts/archive_paths.py pack --source data/raw --output
+      data/dvc_archives/raw.tar.gz
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: 2f70d9bf2a6f39bd359cd8647ad7b1f0.dir
+      size: 132960755
+      nfiles: 1
+    - path: scripts/archive_paths.py
+      hash: md5
+      md5: 793aafbcbab6461fdbf1a9ac3a27514a
+      size: 2812
+    outs:
+    - path: data/dvc_archives/raw.tar.gz
+      hash: md5
+      md5: d3bdb5f49ded37ea9683e2764f4a8ce1
+      size: 19455029
+  process_data:
+    cmd: python data_insight/process_data.py --config configs/data_config.yaml
+    deps:
+    - path: configs/data_config.yaml
+      hash: md5
+      md5: 387a0ae8f370e3046a74cd3d84041162
+      size: 548
+    - path: data/raw/household_power_consumption.txt
+      hash: md5
+      md5: e05286cd4a257d80c3f0407b350df7dd
+      size: 132960755
+    - path: data_insight/process_data.py
+      hash: md5
+      md5: 3e6d0f59cfbb3a36f108dd8a00b68843
+      size: 4607
+    outs:
+    - path: data/processed/household_power_gru.csv
+      hash: md5
+      md5: 049250ae880942f3e89ab77d0fad9607
+      size: 7854234
+  archive_processed:
+    cmd: python scripts/archive_paths.py pack --source data/processed --output
+      data/dvc_archives/processed.tar.gz
+    deps:
+    - path: data/processed/household_power_gru.csv
+      hash: md5
+      md5: 049250ae880942f3e89ab77d0fad9607
+      size: 7854234
+    - path: scripts/archive_paths.py
+      hash: md5
+      md5: 793aafbcbab6461fdbf1a9ac3a27514a
+      size: 2812
+    outs:
+    - path: data/dvc_archives/processed.tar.gz
+      hash: md5
+      md5: b1996c9f781506447a3d0d7dee3b1c92
+      size: 1167461
+  archive_models:
+    cmd: python scripts/archive_paths.py pack --source models --output
+      data/dvc_archives/models.tar.gz --allow-empty
+    deps:
+    - path: models
+      hash: md5
+      md5: 9c1002666630b041c4abe6746d09754d.dir
+      size: 23536163
+      nfiles: 1
+    - path: scripts/archive_paths.py
+      hash: md5
+      md5: 793aafbcbab6461fdbf1a9ac3a27514a
+      size: 2812
+    outs:
+    - path: data/dvc_archives/models.tar.gz
+      hash: md5
+      md5: 72eec39b855d6c5311878048990c28ee
+      size: 16351636

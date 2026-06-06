@@ -1,0 +1,9 @@
+services:
+  mlops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mlops-p4:latest
+    volumes:
+      - ./data:/app/data
+    command: python main.py

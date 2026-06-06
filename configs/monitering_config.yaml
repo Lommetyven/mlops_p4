@@ -1,0 +1,10 @@
+monitoring:
+  project: "MLOps"
+  entity: "tobiasr-aalborg-universitet"
+  run_name: null
+  mode: "online"
+  watch_log: "all"
+  watch_log_freq: 100
+  hardware_log_freq: 50
+  weight_histogram_log_freq: 0
+  save_code: true

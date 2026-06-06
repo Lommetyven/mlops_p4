@@ -1,0 +1,5 @@
+[core]
+    remote = minio
+[remote "minio"]
+    url = s3://energyconsumption/dvc
+    endpointurl = http://172.24.198.42:9000

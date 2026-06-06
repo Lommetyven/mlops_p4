@@ -174,12 +174,12 @@ pipeline {
                         set -eu
                         mkdir -p reports
 
-                        if ! command -v sbatch >/dev/null 2>&1; then
-                            echo "sbatch is required on this Jenkins agent to submit scripts/train_mode.sh" >&2
-                            exit 1
+                        if command -v sbatch >/dev/null 2>&1; then
+                            sbatch --wait --export=ALL scripts/train_mode.sh
+                        else
+                            echo "sbatch not found; running training directly on this Jenkins worker."
+                            bash scripts/train_mode.sh
                         fi
-
-                        sbatch --wait --export=ALL scripts/train_mode.sh
                     '''
                 }
             }

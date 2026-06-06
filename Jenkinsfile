@@ -157,7 +157,7 @@ pipeline {
                 sh '''
                     set -eu
                     export PATH="$PWD/.venv/bin:$PATH"
-                    .venv/bin/python -m dvc repro
+                    .venv/bin/python -m dvc repro archive_processed
                 '''
             }
         }

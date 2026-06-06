@@ -38,7 +38,10 @@ pipeline {
         PIP_DISABLE_PIP_VERSION_CHECK = '1'
         PYTHONUNBUFFERED = '1'
         DVC_REMOTE = 'minio'
+        DVC_REMOTE_URL = 's3://energyconsumption/dvc'
         AWS_ENDPOINT_URL = 'http://172.24.198.42:9000'
+        READABLE_ARTIFACTS_BUCKET = 'energyconsumption'
+        READABLE_ARTIFACTS_PREFIX = 'readable_artifacts'
         WANDB_ENTITY = 'tobiasr-aalborg-universitet'
         WANDB_PROJECT = 'MLOps'
     }
@@ -96,16 +99,29 @@ pipeline {
             steps {
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'minio-energyconsumption',
+                        credentialsId: 'energyconsumption_minio',
                         usernameVariable: 'MINIO_ACCESS_KEY',
                         passwordVariable: 'MINIO_SECRET_KEY'
                     )
                 ]) {
                     sh '''
                         set -eu
+                        .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" url "$DVC_REMOTE_URL"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" access_key_id "$MINIO_ACCESS_KEY"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" secret_access_key "$MINIO_SECRET_KEY"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" endpointurl "$AWS_ENDPOINT_URL"
+
+                        REMOTE_URL="$(.venv/bin/python -m dvc config "remote.$DVC_REMOTE.url")"
+                        REMOTE_ENDPOINT="$(.venv/bin/python -m dvc config "remote.$DVC_REMOTE.endpointurl")"
+                        if [ "$REMOTE_URL" != "$DVC_REMOTE_URL" ]; then
+                            echo "Refusing to continue: DVC remote URL is $REMOTE_URL, expected $DVC_REMOTE_URL" >&2
+                            exit 1
+                        fi
+                        if [ "$REMOTE_ENDPOINT" != "$AWS_ENDPOINT_URL" ]; then
+                            echo "Refusing to continue: DVC endpoint is $REMOTE_ENDPOINT, expected $AWS_ENDPOINT_URL" >&2
+                            exit 1
+                        fi
+
                         .venv/bin/python -m dvc remote list
                     '''
                 }
@@ -151,7 +167,7 @@ pipeline {
             }
             steps {
                 withCredentials([
-                    string(credentialsId: 'wandb-api-key', variable: 'WANDB_API_KEY')
+                    string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
                 ]) {
                     sh '''
                         set -eu
@@ -199,7 +215,19 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-                    .venv/bin/python scripts/upload_readable_artifacts.py --remote-name "$DVC_REMOTE"
+                    if [ "$READABLE_ARTIFACTS_BUCKET" != "energyconsumption" ]; then
+                        echo "Refusing to upload readable artifacts outside bucket energyconsumption." >&2
+                        exit 1
+                    fi
+                    if [ "$READABLE_ARTIFACTS_PREFIX" != "readable_artifacts" ]; then
+                        echo "Refusing to upload readable artifacts outside prefix readable_artifacts." >&2
+                        exit 1
+                    fi
+
+                    .venv/bin/python scripts/upload_readable_artifacts.py \
+                        --remote-name "$DVC_REMOTE" \
+                        --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                        --prefix "$READABLE_ARTIFACTS_PREFIX"
                 '''
             }
         }

@@ -7,6 +7,10 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
+    triggers {
+        githubPush()
+    }
+
     parameters {
         booleanParam(
             name: 'RUN_DVC_REPRO',

@@ -15,7 +15,7 @@ pipeline {
         )
         booleanParam(
             name: 'RUN_TRAINING',
-            defaultValue: false,
+            defaultValue: true,
             description: 'Run full GRU training and log metrics, hardware, and weights to W&B.'
         )
         booleanParam(
@@ -151,7 +151,14 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-                        .venv/bin/python main.py
+                        mkdir -p reports
+
+                        if ! command -v sbatch >/dev/null 2>&1; then
+                            echo "sbatch is required on this Jenkins agent to submit scripts/train_mode.sh" >&2
+                            exit 1
+                        fi
+
+                        sbatch --wait --export=ALL scripts/train_mode.sh
                     '''
                 }
             }
@@ -198,7 +205,7 @@ pipeline {
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt',
+                artifacts: 'dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

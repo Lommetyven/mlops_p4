@@ -156,6 +156,7 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+                    export PATH="$PWD/.venv/bin:$PATH"
                     .venv/bin/python -m dvc repro
                 '''
             }
@@ -191,6 +192,7 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+                    export PATH="$PWD/.venv/bin:$PATH"
                     .venv/bin/python -m dvc repro archive_models
                 '''
             }

@@ -43,6 +43,7 @@ pipeline {
         READABLE_ARTIFACTS_BUCKET = 'energyconsumption'
         READABLE_ARTIFACTS_PREFIX = 'readable_artifacts'
         AI_LAB_HOST = 'ailab-fe01.srv.aau.dk'
+        AI_LAB_SSH_USER = 'sl38ze'
         AI_LAB_REPO_PATH = '/ceph/home/student.aau.dk/sl38ze/MLOps/mlops_p4'
         WANDB_ENTITY = 'tobiasr-aalborg-universitet'
         WANDB_PROJECT = 'MLOps'
@@ -173,7 +174,7 @@ pipeline {
                     sshUserPrivateKey(
                         credentialsId: 'energyconsumption_ai-lab',
                         keyFileVariable: 'AI_LAB_SSH_KEY',
-                        usernameVariable: 'AI_LAB_SSH_USER'
+                        usernameVariable: 'AI_LAB_CREDENTIAL_USER'
                     ),
                     usernamePassword(
                         credentialsId: 'energyconsumption_minio',

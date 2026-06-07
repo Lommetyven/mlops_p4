@@ -24,6 +24,7 @@ fi
 
 echo "Running on host: $(hostname)"
 echo "Repository root: $REPO_ROOT"
+echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-not set}"
 
 if command -v python3.13 >/dev/null 2>&1; then
     BASE_PYTHON=python3.13

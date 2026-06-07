@@ -48,7 +48,11 @@ training:
   num_workers: 8
   seed: 42
   device: "auto"
-  data_parallel: true
+  distributed: true
+  precision: "float32"
+  run_train: true
+  run_validation: true
+  run_test: true
 
 checkpoint:
   output_path: "models/gru_model.pt"
@@ -67,7 +71,7 @@ data_versioning:
     - "latest"
 
 carbon_tracking:
-  enabled: false
+  enabled: true
   log_dir: "reports/carbontracker"
   log_file_prefix: "training"
   epochs_before_pred: 1

@@ -1,12 +1,16 @@
+import os
 import random
 from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import yaml
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from monitoring import (
     carbontracker_log_files,
@@ -79,7 +83,11 @@ DEFAULT_CONFIG = {
         "num_workers": 0,
         "seed": 42,
         "device": "auto",
-        "data_parallel": True,
+        "distributed": True,
+        "precision": "float32",
+        "run_train": True,
+        "run_validation": True,
+        "run_test": True,
     },
     "checkpoint": {
         "output_path": "models/gru_model.pt",
@@ -97,7 +105,7 @@ DEFAULT_CONFIG = {
         "aliases": ["latest"],
     },
     "carbon_tracking": {
-        "enabled": False,
+        "enabled": True,
         "log_dir": "reports/carbontracker",
         "log_file_prefix": "training",
         "epochs_before_pred": 1,
@@ -143,7 +151,45 @@ def seed_everything(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def resolve_device(device_name):
+def setup_distributed_if_requested(training_config):
+    distributed_requested = bool(training_config.get("distributed", True))
+    distributed_env = "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    if not distributed_requested or not distributed_env:
+        return {
+            "distributed": False,
+            "rank": 0,
+            "world_size": 1,
+            "local_rank": 0,
+            "is_main": True,
+        }
+
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
+    dist.init_process_group(backend=backend)
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    return {
+        "distributed": True,
+        "rank": rank,
+        "world_size": world_size,
+        "local_rank": local_rank,
+        "is_main": rank == 0,
+    }
+
+
+def cleanup_distributed(distributed_context):
+    if distributed_context.get("distributed") and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def resolve_device(device_name, distributed_context=None):
+    distributed_context = distributed_context or {}
+    if distributed_context.get("distributed") and torch.cuda.is_available():
+        return torch.device(f"cuda:{distributed_context['local_rank']}")
+
     if device_name == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -151,15 +197,25 @@ def resolve_device(device_name):
 
 
 def unwrap_model(model):
-    return model.module if isinstance(model, nn.DataParallel) else model
+    return (
+        model.module
+        if isinstance(model, (nn.DataParallel, DistributedDataParallel))
+        else model
+    )
 
 
-def maybe_parallelize_model(model, device, training_config):
-    use_data_parallel = bool(training_config.get("data_parallel", True))
-    if device.type == "cuda" and use_data_parallel and torch.cuda.device_count() > 1:
-        return nn.DataParallel(model)
+def maybe_distribute_model(model, device, distributed_context):
+    if not distributed_context.get("distributed"):
+        return model
 
-    return model
+    if device.type == "cuda":
+        return DistributedDataParallel(
+            model,
+            device_ids=[distributed_context["local_rank"]],
+            output_device=distributed_context["local_rank"],
+        )
+
+    return DistributedDataParallel(model)
 
 
 def build_criterion(loss_name):
@@ -202,9 +258,10 @@ def build_optimizer(model, training_config):
     return optimizers[optimizer_name](model.parameters(), **optimizer_kwargs)
 
 
-def build_dataloaders(config):
+def build_dataloaders(config, distributed_context=None):
     data_config = config["data"]
     training_config = config["training"]
+    distributed_context = distributed_context or {}
 
     dataframe = load_processed_dataframe(data_config["processed_path"])
     dataset = build_sequence_dataset(
@@ -225,9 +282,22 @@ def build_dataloaders(config):
         "num_workers": int(training_config["num_workers"]),
         "pin_memory": torch.cuda.is_available(),
     }
+    train_sampler = (
+        DistributedSampler(
+            train_dataset,
+            num_replicas=distributed_context["world_size"],
+            rank=distributed_context["rank"],
+            shuffle=bool(training_config["shuffle"]),
+            seed=int(training_config["seed"]),
+        )
+        if distributed_context.get("distributed")
+        else None
+    )
+
     train_loader = DataLoader(
         train_dataset,
-        shuffle=bool(training_config["shuffle"]),
+        shuffle=bool(training_config["shuffle"]) if train_sampler is None else False,
+        sampler=train_sampler,
         **loader_kwargs,
     )
     val_loader = (
@@ -298,8 +368,19 @@ def log_dataset_version_if_enabled(config, monitor):
 
 
 def build_tracking_metadata(
-    config, config_path, model, sequence_count, split_sizes, device
+    config,
+    config_path,
+    model,
+    sequence_count,
+    split_sizes,
+    device,
+    distributed_context=None,
 ):
+    distributed_context = distributed_context or {
+        "distributed": False,
+        "rank": 0,
+        "world_size": 1,
+    }
     dataset_path = config["data"]["processed_path"]
     dataset_metadata = collect_dataset_metadata(dataset_path)
     git_metadata = dataset_metadata.get("git") or collect_git_metadata()
@@ -332,12 +413,11 @@ def build_tracking_metadata(
         "config/sha256": file_sha256(config_path) if config_path.exists() else None,
         "training/random_seed": int(config["training"]["seed"]),
         "training/device": str(device),
-        "training/data_parallel": 1 if isinstance(model, nn.DataParallel) else 0,
-        "training/gpu_count": (
-            torch.cuda.device_count()
-            if device.type == "cuda" and isinstance(model, nn.DataParallel)
-            else 1
-        ),
+        "training/distributed": 1 if distributed_context["distributed"] else 0,
+        "training/rank": distributed_context["rank"],
+        "training/world_size": distributed_context["world_size"],
+        "training/gpu_count": torch.cuda.device_count() if device.type == "cuda" else 0,
+        "training/precision": config["training"].get("precision", "float32"),
         "training/sequence_count": sequence_count,
         "training/train_split_size": split_sizes["train"],
         "training/validation_split_size": split_sizes["validation"],
@@ -412,20 +492,23 @@ def log_final_tracking_outputs(
     checkpoint_path,
     best_epoch,
     best_metric,
+    precision="float32",
 ):
     task_config = config.get("task", {})
     task_type = task_config.get("type", "regression").lower()
-    checkpoint = load_checkpoint_into_model(checkpoint_path, model, device)
+    evaluation_model = unwrap_model(model)
+    checkpoint = load_checkpoint_into_model(checkpoint_path, evaluation_model, device)
     if checkpoint is not None:
         best_epoch = checkpoint.get("epoch", best_epoch)
         best_metric = checkpoint.get("best_metric", best_metric)
 
     test_metrics = evaluate(
-        model=model,
+        model=evaluation_model,
         data_loader=test_loader,
         criterion=criterion,
         device=device,
         task_config=task_config,
+        precision=precision,
     )
     final_step = int(config["training"]["epochs"]) + 1
     checkpoint_hash = (
@@ -484,24 +567,37 @@ def train_one_epoch(
     optimizer,
     device,
     gradient_clip_norm,
+    precision="float32",
+    scaler=None,
 ):
     model.train()
     total_loss = 0.0
     total_samples = 0
+    use_autocast = autocast_enabled(device, precision)
 
     for features, targets in train_loader:
         features = features.to(device)
         targets = targets.to(device)
 
         optimizer.zero_grad(set_to_none=True)
-        predictions = model(features)
-        loss = criterion(predictions, targets)
-        loss.backward()
+        with torch.autocast(device_type=device.type, enabled=use_autocast):
+            predictions = model(features)
+            loss = criterion(predictions, targets)
 
-        if gradient_clip_norm is not None and gradient_clip_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+        if scaler is not None and scaler.is_enabled():
+            scaler.scale(loss).backward()
+            if gradient_clip_norm is not None and gradient_clip_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
 
-        optimizer.step()
+            if gradient_clip_norm is not None and gradient_clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+
+            optimizer.step()
 
         batch_size = features.size(0)
         total_loss += loss.item() * batch_size
@@ -510,7 +606,9 @@ def train_one_epoch(
     return total_loss / max(total_samples, 1)
 
 
-def evaluate(model, data_loader, criterion, device, task_config=None):
+def evaluate(
+    model, data_loader, criterion, device, task_config=None, precision="float32"
+):
     if data_loader is None:
         return {}
 
@@ -524,8 +622,12 @@ def evaluate(model, data_loader, criterion, device, task_config=None):
         for features, targets in data_loader:
             features = features.to(device)
             targets = targets.to(device)
-            predictions = model(features)
-            loss = criterion(predictions, targets)
+            with torch.autocast(
+                device_type=device.type,
+                enabled=autocast_enabled(device, precision),
+            ):
+                predictions = model(features)
+                loss = criterion(predictions, targets)
 
             batch_size = features.size(0)
             total_loss += loss.item() * batch_size
@@ -697,6 +799,25 @@ def prefix_metrics(metrics, prefix):
     }
 
 
+def normalize_precision(value):
+    precision = str(value or "float32").lower()
+    aliases = {
+        "16": "float16",
+        "fp16": "float16",
+        "float16": "float16",
+        "32": "float32",
+        "fp32": "float32",
+        "float32": "float32",
+    }
+    if precision not in aliases:
+        raise ValueError("training.precision must be one of float16 or float32.")
+    return aliases[precision]
+
+
+def autocast_enabled(device, precision):
+    return device.type == "cuda" and normalize_precision(precision) == "float16"
+
+
 def save_checkpoint(path, model, optimizer, epoch, best_metric, config):
     checkpoint_path = Path(path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -723,6 +844,8 @@ def main(config_path="configs/train_config.yaml"):
     model_config = config["model"]
     training_config = config["training"]
     checkpoint_config = config["checkpoint"]
+    distributed_context = setup_distributed_if_requested(training_config)
+    is_main_process = distributed_context["is_main"]
 
     if int(model_config["input_size"]) != len(config["data"]["feature_columns"]):
         raise ValueError(
@@ -730,14 +853,19 @@ def main(config_path="configs/train_config.yaml"):
         )
 
     seed_everything(int(training_config["seed"]))
-    device = resolve_device(training_config["device"])
+    device = resolve_device(training_config["device"], distributed_context)
+    precision = normalize_precision(training_config.get("precision", "float32"))
+    run_train = bool(training_config.get("run_train", True))
+    run_validation = bool(training_config.get("run_validation", True))
+    run_test = bool(training_config.get("run_test", True))
 
     model = GruModel(**model_config).to(device)
-    model = maybe_parallelize_model(model, device, training_config)
+    model = maybe_distribute_model(model, device, distributed_context)
     criterion = build_criterion(training_config["loss"])
     optimizer = build_optimizer(model, training_config)
+    scaler = torch.cuda.amp.GradScaler(enabled=autocast_enabled(device, precision))
     train_loader, val_loader, test_loader, sequence_count, split_sizes = (
-        build_dataloaders(config)
+        build_dataloaders(config, distributed_context=distributed_context)
     )
     tracking_metadata = build_tracking_metadata(
         config=config,
@@ -746,121 +874,164 @@ def main(config_path="configs/train_config.yaml"):
         sequence_count=sequence_count,
         split_sizes=split_sizes,
         device=device,
+        distributed_context=distributed_context,
     )
     config["tracking"] = tracking_metadata
-    monitor = start_monitoring_if_enabled(config, model)
-    log_initial_tracking_metadata(monitor, tracking_metadata)
-    log_dataset_version_if_enabled(config, monitor)
-    carbon_tracker = start_carbon_tracker_if_enabled(config)
+    monitor = (
+        start_monitoring_if_enabled(config, unwrap_model(model))
+        if is_main_process
+        else None
+    )
+    if is_main_process:
+        log_initial_tracking_metadata(monitor, tracking_metadata)
+        log_dataset_version_if_enabled(config, monitor)
+    carbon_tracker = (
+        start_carbon_tracker_if_enabled(config)
+        if is_main_process and run_train
+        else None
+    )
 
     best_metric = float("inf")
     best_epoch = None
     save_best_only = bool(checkpoint_config["save_best_only"])
     checkpoint_path = checkpoint_config["output_path"]
 
-    print(f"Loaded config: {config_path}")
-    print(f"Processed data: {config['data']['processed_path']}")
-    print(f"Device: {device}")
-    if isinstance(model, nn.DataParallel):
-        print(f"DataParallel GPUs: {torch.cuda.device_count()}")
-    print(f"Sequences: {sequence_count}")
-    print(f"Split sizes: {split_sizes}")
-    print(f"Epochs: {training_config['epochs']}")
-    print(f"Batch size: {training_config['batch_size']}")
-    print(f"Sequence length: {training_config['sequence_length']}")
-    print(f"Learning rate: {training_config['learning_rate']}")
-    print(f"Parameter breakdown: {unwrap_model(model).parameter_breakdown()}")
-    if carbon_tracker is not None:
-        print(
-            "CarbonTracker: enabled "
-            f"({config['carbon_tracking']['components']}, "
-            f"log_dir={config['carbon_tracking']['log_dir']})"
-        )
+    if is_main_process:
+        print(f"Loaded config: {config_path}")
+        print(f"Processed data: {config['data']['processed_path']}")
+        print(f"Device: {device}")
+        print(f"Distributed: {distributed_context['distributed']}")
+        print(f"World size: {distributed_context['world_size']}")
+        print(f"Precision: {precision}")
+        print(f"Sequences: {sequence_count}")
+        print(f"Split sizes: {split_sizes}")
+        print(f"Epochs: {training_config['epochs']}")
+        print(f"Batch size: {training_config['batch_size']}")
+        print(f"Sequence length: {training_config['sequence_length']}")
+        print(f"Learning rate: {training_config['learning_rate']}")
+        print(f"Parameter breakdown: {unwrap_model(model).parameter_breakdown()}")
+        if carbon_tracker is not None:
+            print(
+                "CarbonTracker: enabled "
+                f"({config['carbon_tracking']['components']}, "
+                f"log_dir={config['carbon_tracking']['log_dir']})"
+            )
 
     carbon_summary = {}
     try:
-        for epoch in range(1, int(training_config["epochs"]) + 1):
-            if carbon_tracker is not None:
-                carbon_tracker.epoch_start()
+        if run_train:
+            for epoch in range(1, int(training_config["epochs"]) + 1):
+                if hasattr(train_loader.sampler, "set_epoch"):
+                    train_loader.sampler.set_epoch(epoch)
 
-            train_loss = train_one_epoch(
-                model=model,
-                train_loader=train_loader,
-                criterion=criterion,
-                optimizer=optimizer,
-                device=device,
-                gradient_clip_norm=float(training_config["gradient_clip_norm"]),
-            )
+                if carbon_tracker is not None:
+                    carbon_tracker.epoch_start()
 
-            if carbon_tracker is not None:
-                carbon_tracker.epoch_end()
-
-            val_metrics = evaluate(
-                model=model,
-                data_loader=val_loader,
-                criterion=criterion,
-                device=device,
-                task_config=config["task"],
-            )
-            val_loss = val_metrics.get("loss") if val_metrics else None
-            checkpoint_metric = val_loss if val_loss is not None else train_loss
-
-            should_save = not save_best_only or checkpoint_metric < best_metric
-            if should_save:
-                best_metric = checkpoint_metric
-                best_epoch = epoch
-                save_checkpoint(
-                    path=checkpoint_path,
+                train_loss = train_one_epoch(
                     model=model,
+                    train_loader=train_loader,
+                    criterion=criterion,
                     optimizer=optimizer,
-                    epoch=epoch,
-                    best_metric=best_metric,
-                    config=config,
+                    device=device,
+                    gradient_clip_norm=float(training_config["gradient_clip_norm"]),
+                    precision=precision,
+                    scaler=scaler,
                 )
 
-            metrics = prefix_metrics(
-                {key: value for key, value in val_metrics.items() if key != "loss"},
-                "val",
-            )
-            if monitor is not None:
-                monitor.log_training_step(
-                    step=epoch,
-                    epoch=epoch,
-                    train_loss=train_loss,
-                    val_loss=val_loss,
-                    learning_rate=get_learning_rate(optimizer),
-                    metrics=metrics,
-                    model=model,
-                )
+                if carbon_tracker is not None:
+                    carbon_tracker.epoch_end()
 
-            val_text = f"{val_loss:.6f}" if val_loss is not None else "n/a"
-            print(
-                f"Epoch {epoch}/{training_config['epochs']} "
-                f"train_loss={train_loss:.6f} val_loss={val_text}"
-            )
+                val_metrics = {}
+                val_loss = None
+                if is_main_process and run_validation:
+                    val_metrics = evaluate(
+                        model=unwrap_model(model),
+                        data_loader=val_loader,
+                        criterion=criterion,
+                        device=device,
+                        task_config=config["task"],
+                        precision=precision,
+                    )
+                    val_loss = val_metrics.get("loss") if val_metrics else None
+
+                checkpoint_metric = val_loss if val_loss is not None else train_loss
+                should_save = is_main_process and (
+                    not save_best_only or checkpoint_metric < best_metric
+                )
+                if should_save:
+                    best_metric = checkpoint_metric
+                    best_epoch = epoch
+                    save_checkpoint(
+                        path=checkpoint_path,
+                        model=model,
+                        optimizer=optimizer,
+                        epoch=epoch,
+                        best_metric=best_metric,
+                        config=config,
+                    )
+
+                if distributed_context["distributed"]:
+                    dist.barrier()
+
+                metrics = prefix_metrics(
+                    {key: value for key, value in val_metrics.items() if key != "loss"},
+                    "val",
+                )
+                if monitor is not None:
+                    monitor.log_training_step(
+                        step=epoch,
+                        epoch=epoch,
+                        train_loss=train_loss,
+                        val_loss=val_loss,
+                        learning_rate=get_learning_rate(optimizer),
+                        metrics=metrics,
+                        model=unwrap_model(model),
+                    )
+
+                if is_main_process:
+                    val_text = f"{val_loss:.6f}" if val_loss is not None else "n/a"
+                    print(
+                        f"Epoch {epoch}/{training_config['epochs']} "
+                        f"train_loss={train_loss:.6f} val_loss={val_text}"
+                    )
     finally:
-        test_metrics, final_tracking_summary = log_final_tracking_outputs(
-            config=config,
-            monitor=monitor,
-            model=model,
-            test_loader=test_loader,
-            criterion=criterion,
-            device=device,
-            checkpoint_path=checkpoint_path,
-            best_epoch=best_epoch,
-            best_metric=best_metric,
-        )
-        carbon_summary = finish_carbon_tracker(carbon_tracker, config)
-        log_carbon_summary(config, monitor, carbon_summary)
-        if monitor is not None:
-            monitor.finish()
+        if distributed_context["distributed"]:
+            dist.barrier()
 
-    print(f"Saved checkpoint to: {checkpoint_path}")
-    print(f"Best epoch: {final_tracking_summary['model/best_epoch']}")
-    if test_metrics:
-        print(f"Test metrics: {test_metrics}")
-    if carbon_summary:
-        print(f"CarbonTracker summary: {carbon_summary}")
+        if is_main_process:
+            if run_test:
+                test_metrics, final_tracking_summary = log_final_tracking_outputs(
+                    config=config,
+                    monitor=monitor,
+                    model=model,
+                    test_loader=test_loader,
+                    criterion=criterion,
+                    device=device,
+                    checkpoint_path=checkpoint_path,
+                    best_epoch=best_epoch,
+                    best_metric=best_metric,
+                    precision=precision,
+                )
+            else:
+                test_metrics = {}
+                final_tracking_summary = {
+                    "model/best_epoch": best_epoch,
+                    "model/best_metric": best_metric,
+                }
+
+            carbon_summary = finish_carbon_tracker(carbon_tracker, config)
+            log_carbon_summary(config, monitor, carbon_summary)
+            if monitor is not None:
+                monitor.finish()
+
+            print(f"Saved checkpoint to: {checkpoint_path}")
+            print(f"Best epoch: {final_tracking_summary['model/best_epoch']}")
+            if test_metrics:
+                print(f"Test metrics: {test_metrics}")
+            if carbon_summary:
+                print(f"CarbonTracker summary: {carbon_summary}")
+
+        cleanup_distributed(distributed_context)
 
 
 if __name__ == "__main__":

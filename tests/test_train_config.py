@@ -31,7 +31,7 @@ def test_train_config_yaml_has_required_sections():
     assert config["data"]["target_column"] == "target_next_hour"
     assert config["data_versioning"]["enabled"] is True
     assert config["data_versioning"]["artifact_type"] == "dataset"
-    assert config["carbon_tracking"]["enabled"] is False
+    assert config["carbon_tracking"]["enabled"] is True
     assert config["carbon_tracking"]["log_dir"] == "reports/carbontracker"
 
     training = config["training"]
@@ -50,7 +50,11 @@ def test_train_config_yaml_has_required_sections():
         "num_workers",
         "seed",
         "device",
-        "data_parallel",
+        "distributed",
+        "precision",
+        "run_train",
+        "run_validation",
+        "run_test",
     ):
         assert key in training
 
@@ -81,7 +85,7 @@ training:
     assert config["task"]["type"] == "regression"
     assert config["checkpoint"]["output_path"] == "models/gru_model.pt"
     assert config["data_versioning"]["artifact_name"] == "household-power-gru"
-    assert config["carbon_tracking"]["enabled"] is False
+    assert config["carbon_tracking"]["enabled"] is True
 
 
 def test_default_train_config_file_exists():

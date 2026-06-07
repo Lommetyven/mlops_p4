@@ -12,26 +12,42 @@ pipeline {
     }
 
     parameters {
-        booleanParam(
-            name: 'RUN_DVC_REPRO',
-            defaultValue: true,
-            description: 'Rebuild processed data and local archives with DVC.'
+        booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
+        booleanParam(name: 'RUN_TRAINING', defaultValue: true, description: 'Run GRU training.')
+        booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
+        booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload raw, processed, model, and archive files under readable_artifacts/.')
+
+        booleanParam(name: 'DO_TRAIN', defaultValue: true, description: 'Run the training loop.')
+        booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.')
+        booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.')
+
+        string(name: 'MODEL_VERSION', defaultValue: '', description: 'Optional W&B/model version. Blank uses configs/train_config.yaml.')
+        string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.')
+        string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.')
+        string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.')
+        string(name: 'BATCH_SIZE', defaultValue: '', description: 'Optional batch size override. Blank uses config.')
+        string(name: 'SEQUENCE_LENGTH', defaultValue: '', description: 'Optional sequence length override. Blank uses config.')
+        string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.')
+        string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
+        choice(name: 'FLOAT_PRECISION', choices: ['float32', 'float16'], description: 'Training precision. float16 uses CUDA mixed precision.')
+
+        string(name: 'DATASET_PATH', defaultValue: '', description: 'Optional processed dataset path, e.g. data/processed/household_power_gru.csv. Blank uses config.')
+        string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
+        string(name: 'TEST_SPLIT', defaultValue: '', description: 'Optional test split, e.g. 0.1. Blank uses config.')
+        string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.')
+
+        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.')
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2'], description: 'AI Lab Slurm GPU count.')
+        choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.')
+        choice(
+            name: 'AI_LAB_TIME_LIMIT',
+            choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'],
+            description: 'AI Lab Slurm max wall time.'
         )
-        booleanParam(
-            name: 'RUN_TRAINING',
-            defaultValue: true,
-            description: 'Run full GRU training and log metrics, hardware, and weights to W&B.'
-        )
-        booleanParam(
-            name: 'PUSH_DVC',
-            defaultValue: true,
-            description: 'Push DVC cache updates to the configured MinIO remote.'
-        )
-        booleanParam(
-            name: 'UPLOAD_READABLE_ARTIFACTS',
-            defaultValue: true,
-            description: 'Upload raw, processed, and model files under readable_artifacts/.'
-        )
+
+        string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.')
+        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.')
+        booleanParam(name: 'HARDWARE_TRACKING', defaultValue: true, description: 'Log GPU utilization, GPU memory, GPU temperature, GPU power, CPU, RAM, runtime, and energy/carbon estimates where available.')
     }
 
     environment {
@@ -46,6 +62,9 @@ pipeline {
         AI_LAB_REPO_PATH = '/ceph/home/student.aau.dk/sl38ze/MLOps/mlops_p4'
         WANDB_ENTITY = 'tobiasr-aalborg-universitet'
         WANDB_PROJECT = 'MLOps'
+        TRAIN_CONFIG_PATH = 'reports/runtime_train_config.yaml'
+        MONITORING_CONFIG_PATH = 'reports/runtime_monitoring_config.yaml'
+        TRAIN_DISTRIBUTED = 'true'
     }
 
     stages {
@@ -108,6 +127,9 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
+                        export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
+                        export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
+
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" url "$DVC_REMOTE_URL"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" access_key_id "$MINIO_ACCESS_KEY"
                         .venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" secret_access_key "$MINIO_SECRET_KEY"
@@ -125,6 +147,54 @@ pipeline {
                         fi
 
                         .venv/bin/python -m dvc remote list
+                    '''
+                }
+            }
+        }
+
+        stage('Show MinIO Context') {
+            when {
+                anyOf {
+                    expression { return params.RUN_TRAINING }
+                    expression { return params.UPLOAD_READABLE_ARTIFACTS }
+                }
+            }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'energyconsumption_minio',
+                        usernameVariable: 'MINIO_ACCESS_KEY',
+                        passwordVariable: 'MINIO_SECRET_KEY'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
+                        export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
+                        .venv/bin/python - <<'PY'
+import os
+import s3fs
+
+bucket = os.environ["READABLE_ARTIFACTS_BUCKET"]
+readable_prefix = os.environ["READABLE_ARTIFACTS_PREFIX"].strip("/")
+endpoint_url = os.environ["AWS_ENDPOINT_URL"]
+fs = s3fs.S3FileSystem(
+    key=os.environ["AWS_ACCESS_KEY_ID"],
+    secret=os.environ["AWS_SECRET_ACCESS_KEY"],
+    client_kwargs={"endpoint_url": endpoint_url},
+)
+for label, prefix in {
+    "DVC cache": f"{bucket}/dvc",
+    "Readable datasets": f"{bucket}/{readable_prefix}/processed",
+    "Readable models": f"{bucket}/{readable_prefix}/models",
+}.items():
+    print(f"\\n{label}: s3://{prefix}")
+    try:
+        for path in fs.ls(prefix, detail=False)[:20]:
+            print(f"  {path}")
+    except FileNotFoundError:
+        print("  not found yet")
+PY
                     '''
                 }
             }
@@ -164,9 +234,53 @@ pipeline {
             }
         }
 
-        stage('Train') {
+        stage('Generate Runtime Config') {
             when {
                 expression { return params.RUN_TRAINING }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    mkdir -p reports
+                    .venv/bin/python scripts/write_runtime_config.py \
+                        --output "$TRAIN_CONFIG_PATH" \
+                        --monitoring-output "$MONITORING_CONFIG_PATH"
+                    echo "Effective runtime training config:"
+                    sed -n '1,180p' "$TRAIN_CONFIG_PATH"
+                    echo "Effective runtime monitoring config:"
+                    sed -n '1,120p' "$MONITORING_CONFIG_PATH"
+                '''
+            }
+        }
+
+        stage('Train on DAKI Worker') {
+            when {
+                allOf {
+                    expression { return params.RUN_TRAINING }
+                    expression { return params.TRAIN_RUNNER == 'DAKI_WORKER' }
+                }
+            }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+                        export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
+                        export TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
+                        scripts/train_mode.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Train on AI Lab') {
+            when {
+                allOf {
+                    expression { return params.RUN_TRAINING }
+                    expression { return params.TRAIN_RUNNER == 'AI_LAB' }
+                }
             }
             steps {
                 withCredentials([
@@ -185,7 +299,7 @@ pipeline {
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT'"
 
                         tar -czf reports/ai_lab_code.tar.gz \
                             configs \
@@ -193,6 +307,8 @@ pipeline {
                             monitoring \
                             scripts \
                             train \
+                            reports/runtime_train_config.yaml \
+                            reports/runtime_monitoring_config.yaml \
                             dvc.lock \
                             dvc.yaml \
                             main.py \
@@ -205,7 +321,7 @@ pipeline {
 set -eu
 
 WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
-export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
 
 cd "$AI_LAB_REPO_PATH"
 tar -xzf reports/ai_lab_code.tar.gz
@@ -238,13 +354,19 @@ REMOTE_SCRIPT
 set -eu
 
 WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
-export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
 
 cd "$AI_LAB_REPO_PATH"
 tar -xzf reports/ai_lab_data.tar.gz
 rm -f reports/ai_lab_data.tar.gz
 mkdir -p models reports
-sbatch --wait --export=ALL scripts/train_mode.sh
+sbatch \
+    --wait \
+    --gres="gpu:${AI_LAB_GPUS}" \
+    --cpus-per-task="${AI_LAB_CPUS}" \
+    --time="${AI_LAB_TIME_LIMIT}" \
+    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED" \
+    scripts/train_mode.sh
 tar --exclude=reports/ai_lab_results.tar.gz -czf reports/ai_lab_results.tar.gz models reports
 REMOTE_SCRIPT
 
@@ -309,7 +431,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

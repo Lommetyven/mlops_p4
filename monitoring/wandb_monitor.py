@@ -26,6 +26,7 @@ class WandbMonitorConfig:
     watch_log: str = "all"
     watch_log_freq: int = 100
     hardware_log_freq: int = 50
+    hardware_tracking_enabled: bool = True
     weight_histogram_log_freq: int = 0
     save_code: bool = True
 
@@ -131,6 +132,9 @@ class WandbMonitor:
 
     def log_hardware(self, step: int | None = None, force: bool = False):
         self._require_run()
+
+        if not self.config.hardware_tracking_enabled:
+            return
 
         if not force and step is not None:
             if step % self.config.hardware_log_freq != 0:

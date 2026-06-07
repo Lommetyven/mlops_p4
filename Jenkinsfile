@@ -187,6 +187,20 @@ pipeline {
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
                         REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH'"
 
+                        tar -czf reports/ai_lab_code.tar.gz \
+                            configs \
+                            data_insight \
+                            monitoring \
+                            scripts \
+                            train \
+                            dvc.lock \
+                            dvc.yaml \
+                            main.py \
+                            pyproject.toml \
+                            requirements.txt
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "mkdir -p '$AI_LAB_REPO_PATH/reports'"
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" reports/ai_lab_code.tar.gz "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/"
+
                         ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'
 set -eu
 
@@ -194,9 +208,8 @@ WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
 export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
 
 cd "$AI_LAB_REPO_PATH"
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
+tar -xzf reports/ai_lab_code.tar.gz
+rm -f reports/ai_lab_code.tar.gz
 
 if command -v python3.13 >/dev/null 2>&1; then
     PYTHON_BIN=python3.13

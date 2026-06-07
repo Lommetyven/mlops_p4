@@ -232,6 +232,7 @@ fi
 
 mkdir -p reports
 sbatch --wait --export=ALL scripts/train_mode.sh
+export PATH="$PWD/.venv/bin:$PATH"
 .venv/bin/python -m dvc repro archive_models
 
 if [ "$PUSH_DVC_PARAM" = "true" ]; then

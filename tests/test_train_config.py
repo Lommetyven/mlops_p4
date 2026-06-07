@@ -85,6 +85,10 @@ training:
     assert config["model"]["input_size"] == 16
     assert config["task"]["type"] == "regression"
     assert config["checkpoint"]["output_path"] == "models/gru_model.pt"
+    assert (
+        config["checkpoint"]["torchscript_output_path"]
+        == "models/gru_model_torchscript.pt"
+    )
     assert config["data_versioning"]["artifact_name"] == "household-power-gru"
     assert config["carbon_tracking"]["enabled"] is True
 

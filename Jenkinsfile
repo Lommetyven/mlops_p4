@@ -13,7 +13,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
-        booleanParam(name: 'RUN_TRAINING', defaultValue: true, description: 'Run GRU training.')
+        booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.')
 
@@ -74,7 +74,7 @@ pipeline {
             steps {
                 script {
                     env.RUN_DVC_REPRO = "${params.RUN_DVC_REPRO == null ? true : params.RUN_DVC_REPRO}"
-                    env.RUN_TRAINING = "${params.RUN_TRAINING == null ? true : params.RUN_TRAINING}"
+                    env.RUN_TRAINING = "${params.RUN_TRAINING == null ? false : params.RUN_TRAINING}"
                     env.PUSH_DVC = "${params.PUSH_DVC == null ? true : params.PUSH_DVC}"
                     env.UPLOAD_READABLE_ARTIFACTS = "${params.UPLOAD_READABLE_ARTIFACTS == null ? true : params.UPLOAD_READABLE_ARTIFACTS}"
 
@@ -475,7 +475,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

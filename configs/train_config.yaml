@@ -57,6 +57,7 @@ training:
 
 checkpoint:
   output_path: "models/gru_model.pt"
+  torchscript_output_path: "models/gru_model_torchscript.pt"
   save_best_only: true
 
 monitoring:

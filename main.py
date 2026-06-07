@@ -92,6 +92,7 @@ DEFAULT_CONFIG = {
     },
     "checkpoint": {
         "output_path": "models/gru_model.pt",
+        "torchscript_output_path": "models/gru_model_torchscript.pt",
         "save_best_only": True,
     },
     "monitoring": {
@@ -1037,6 +1038,18 @@ def save_checkpoint(path, model, optimizer, epoch, best_metric, config):
     )
 
 
+def export_torchscript_model(model, output_path, sequence_length, device):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    evaluation_model = unwrap_model(model).to(device)
+    evaluation_model.eval()
+    _ = sequence_length
+    with torch.no_grad():
+        scripted_model = torch.jit.script(evaluation_model)
+    scripted_model.save(str(output_path))
+    return output_path
+
+
 def get_learning_rate(optimizer):
     return optimizer.param_groups[0]["lr"]
 
@@ -1237,6 +1250,15 @@ def main(config_path="configs/train_config.yaml"):
                 test_metrics=test_metrics,
                 carbon_summary=carbon_summary,
             )
+            torchscript_path = export_torchscript_model(
+                model=model,
+                output_path=checkpoint_config.get(
+                    "torchscript_output_path",
+                    "models/gru_model_torchscript.pt",
+                ),
+                sequence_length=training_config["sequence_length"],
+                device=device,
+            )
             if monitor is not None:
                 model_version = config.get("experiment", {}).get(
                     "model_version",
@@ -1259,6 +1281,7 @@ def main(config_path="configs/train_config.yaml"):
                 monitor.finish()
 
             print(f"Saved checkpoint to: {checkpoint_path}")
+            print(f"TorchScript model: {torchscript_path}")
             print(f"Model card: {model_card_path}")
             print(f"Best epoch: {final_tracking_summary['model/best_epoch']}")
             if test_metrics:

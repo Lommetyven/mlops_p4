@@ -17,18 +17,25 @@ if command -v module >/dev/null 2>&1; then
     module load python || true
 fi
 
-if [ -x .venv/bin/python ]; then
-    PYTHON_BIN=.venv/bin/python
+echo "Running on host: $(hostname)"
+echo "Repository root: $REPO_ROOT"
+
+if command -v python3.13 >/dev/null 2>&1; then
+    BASE_PYTHON=python3.13
 elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN=python3
+    BASE_PYTHON=python3
 else
-    PYTHON_BIN=python
+    BASE_PYTHON=python
 fi
 
-if [ ! -x .venv/bin/dvc ]; then
-    echo "Missing .venv/bin/dvc. Run pip install -r requirements.txt before submitting this job." >&2
-    exit 1
+if [ ! -x .venv/bin/python ] || [ ! -x .venv/bin/dvc ]; then
+    echo "Preparing .venv on Slurm node..."
+    "$BASE_PYTHON" -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install -r requirements.txt
 fi
+
+PYTHON_BIN=.venv/bin/python
 
 echo "Using Python: $("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
 echo "Using DVC: $(.venv/bin/dvc --version)"

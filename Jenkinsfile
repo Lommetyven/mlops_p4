@@ -470,7 +470,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

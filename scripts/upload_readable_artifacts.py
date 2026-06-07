@@ -158,6 +158,15 @@ def upload_readable_artifacts(
             upload_directory(filesystem, local_directory, bucket, s3_prefix)
         )
 
+    model_card = upload_file(
+        filesystem,
+        "reports/model_card.md",
+        bucket,
+        f"{prefix}/models/model_card.md",
+    )
+    if model_card is not None:
+        manifest["uploads"].append(model_card)
+
     remove_stale_archive_uploads(filesystem, bucket, prefix)
 
     upload_manifest(filesystem, manifest, bucket, prefix)

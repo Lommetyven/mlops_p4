@@ -34,7 +34,7 @@ data:
   target_column: "target_next_hour"
 
 training:
-  epochs: 1
+  epochs: 50
   batch_size: 32
   sequence_length: 12
   learning_rate: 0.001
@@ -45,9 +45,10 @@ training:
   validation_split: 0.2
   test_split: 0.1
   shuffle: true
-  num_workers: 0
+  num_workers: 8
   seed: 42
   device: "auto"
+  data_parallel: true
 
 checkpoint:
   output_path: "models/gru_model.pt"

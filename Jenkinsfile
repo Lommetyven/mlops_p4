@@ -1,3 +1,60 @@
+import groovy.json.JsonSlurperClassic
+
+def normalizeChoiceValues(values) {
+    def choices = ['']
+    if (values != null) {
+        values.each { value ->
+            def choice = value == null ? '' : value.toString().trim()
+            if (choice) {
+                choices.add(choice)
+            }
+        }
+    }
+    return choices.unique()
+}
+
+def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
+    def datasets = normalizeChoiceValues(datasetChoices)
+    def modelVersions = normalizeChoiceValues(modelVersionChoices)
+
+    return [
+        booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.'),
+        booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.'),
+        booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.'),
+        booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.'),
+        booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.'),
+
+        booleanParam(name: 'DO_TRAIN', defaultValue: true, description: 'Run the training loop.'),
+        booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.'),
+        booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.'),
+
+        choice(name: 'MODEL_VERSION', choices: modelVersions, description: 'Optional W&B/model version from readable MinIO model artifacts. Blank uses configs/train_config.yaml.'),
+        string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.'),
+        string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.'),
+        string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.'),
+        string(name: 'BATCH_SIZE', defaultValue: '', description: 'Optional batch size override. Blank uses config.'),
+        string(name: 'SEQUENCE_LENGTH', defaultValue: '', description: 'Optional sequence length override. Blank uses config.'),
+        string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.'),
+        string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.'),
+        choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.'),
+
+        choice(name: 'DATASET_PATH', choices: datasets, description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.'),
+        string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.'),
+        string(name: 'TEST_SPLIT', defaultValue: '', description: 'Optional test split, e.g. 0.1. Blank uses config.'),
+        string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.'),
+
+        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.'),
+        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.'),
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2'], description: 'AI Lab Slurm GPU count.'),
+        choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.'),
+        choice(name: 'AI_LAB_TIME_LIMIT', choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'], description: 'AI Lab Slurm max wall time.'),
+
+        string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.'),
+        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.'),
+        booleanParam(name: 'HARDWARE_TRACKING', defaultValue: true, description: 'Log GPU utilization, GPU memory, GPU temperature, GPU power, CPU, RAM, runtime, and energy/carbon estimates where available.')
+    ]
+}
+
 pipeline {
     agent any
 
@@ -12,6 +69,7 @@ pipeline {
     }
 
     parameters {
+        booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.')
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
@@ -21,7 +79,7 @@ pipeline {
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.')
         booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.')
 
-        string(name: 'MODEL_VERSION', defaultValue: '', description: 'Optional W&B/model version. Blank uses configs/train_config.yaml.')
+        choice(name: 'MODEL_VERSION', choices: [''], description: 'Optional W&B/model version from readable MinIO model artifacts. Blank uses configs/train_config.yaml.')
         string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.')
         string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.')
         string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.')
@@ -31,7 +89,7 @@ pipeline {
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.')
 
-        string(name: 'DATASET_PATH', defaultValue: '', description: 'Optional processed dataset path, e.g. data/processed/household_power_gru.csv. Blank uses config.')
+        choice(name: 'DATASET_PATH', choices: [''], description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
         string(name: 'TEST_SPLIT', defaultValue: '', description: 'Optional test split, e.g. 0.1. Blank uses config.')
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.')
@@ -72,6 +130,7 @@ pipeline {
         stage('Apply Parameter Defaults') {
             steps {
                 script {
+                    env.REFRESH_MINIO_CHOICES = "${params.REFRESH_MINIO_CHOICES == null ? true : params.REFRESH_MINIO_CHOICES}"
                     env.RUN_DVC_REPRO = "${params.RUN_DVC_REPRO == null ? true : params.RUN_DVC_REPRO}"
                     env.RUN_TRAINING = "${params.RUN_TRAINING == null ? false : params.RUN_TRAINING}"
                     env.PUSH_DVC = "${params.PUSH_DVC == null ? true : params.PUSH_DVC}"
@@ -153,6 +212,7 @@ pipeline {
         stage('Configure MinIO') {
             when {
                 anyOf {
+                    expression { return env.REFRESH_MINIO_CHOICES == 'true' }
                     expression { return env.RUN_DVC_REPRO == 'true' }
                     expression { return env.RUN_TRAINING == 'true' }
                     expression { return env.PUSH_DVC == 'true' }
@@ -190,6 +250,48 @@ pipeline {
 
                         .venv/bin/python -m dvc remote list
                     '''
+                }
+            }
+        }
+
+        stage('Refresh MinIO Parameter Choices') {
+            when {
+                expression { return env.REFRESH_MINIO_CHOICES == 'true' }
+            }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'energyconsumption_minio',
+                        usernameVariable: 'MINIO_ACCESS_KEY',
+                        passwordVariable: 'MINIO_SECRET_KEY'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        mkdir -p reports
+                        export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
+                        export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
+                        .venv/bin/python scripts/list_minio_parameter_choices.py \
+                            --remote-name "$DVC_REMOTE" \
+                            --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                            --prefix "$READABLE_ARTIFACTS_PREFIX" \
+                            --output reports/minio_parameter_choices.json
+                    '''
+                    script {
+                        def choices = new JsonSlurperClassic().parseText(
+                            readFile('reports/minio_parameter_choices.json')
+                        )
+                        properties([
+                            buildDiscarder(logRotator(numToKeepStr: '20')),
+                            pipelineTriggers([pollSCM('H/5 * * * *')]),
+                            parameters(jobParameterDefinitions(
+                                choices.datasets ?: [''],
+                                choices.model_versions ?: ['']
+                            ))
+                        ])
+                        echo "Refreshed Jenkins dataset choices: ${(choices.datasets ?: []).size()}"
+                        echo "Refreshed Jenkins model-version choices: ${(choices.model_versions ?: []).size()}"
+                    }
                 }
             }
         }
@@ -473,7 +575,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

@@ -4,13 +4,18 @@
 #SBATCH --time=05:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
+#SBATCH --chdir=/ceph/home/student.aau.dk/sl38ze/MLOps/mlops_p4
 #SBATCH --output=reports/slurm-%j.out
 #SBATCH --error=reports/slurm-%j.err
 
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+    REPO_ROOT="$SLURM_SUBMIT_DIR"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 cd "$REPO_ROOT"
 
 if command -v module >/dev/null 2>&1; then

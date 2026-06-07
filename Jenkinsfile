@@ -68,6 +68,45 @@ pipeline {
     }
 
     stages {
+        stage('Apply Parameter Defaults') {
+            steps {
+                script {
+                    env.RUN_DVC_REPRO = "${params.RUN_DVC_REPRO == null ? true : params.RUN_DVC_REPRO}"
+                    env.RUN_TRAINING = "${params.RUN_TRAINING == null ? true : params.RUN_TRAINING}"
+                    env.PUSH_DVC = "${params.PUSH_DVC == null ? true : params.PUSH_DVC}"
+                    env.UPLOAD_READABLE_ARTIFACTS = "${params.UPLOAD_READABLE_ARTIFACTS == null ? true : params.UPLOAD_READABLE_ARTIFACTS}"
+
+                    env.DO_TRAIN = "${params.DO_TRAIN == null ? true : params.DO_TRAIN}"
+                    env.DO_VALIDATE = "${params.DO_VALIDATE == null ? true : params.DO_VALIDATE}"
+                    env.DO_TEST = "${params.DO_TEST == null ? true : params.DO_TEST}"
+
+                    env.MODEL_VERSION = params.MODEL_VERSION ?: ''
+                    env.MODEL_HIDDEN_SIZE = params.MODEL_HIDDEN_SIZE ?: ''
+                    env.MODEL_NUM_LAYERS = params.MODEL_NUM_LAYERS ?: ''
+                    env.EPOCHS = params.EPOCHS ?: ''
+                    env.BATCH_SIZE = params.BATCH_SIZE ?: ''
+                    env.SEQUENCE_LENGTH = params.SEQUENCE_LENGTH ?: ''
+                    env.LEARNING_RATE = params.LEARNING_RATE ?: ''
+                    env.WEIGHT_DECAY = params.WEIGHT_DECAY ?: ''
+                    env.FLOAT_PRECISION = params.FLOAT_PRECISION ?: ''
+
+                    env.DATASET_PATH = params.DATASET_PATH ?: ''
+                    env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''
+                    env.TEST_SPLIT = params.TEST_SPLIT ?: ''
+                    env.RANDOM_SEED = params.RANDOM_SEED ?: ''
+
+                    env.TRAIN_RUNNER = params.TRAIN_RUNNER ?: 'AI_LAB'
+                    env.AI_LAB_GPUS = params.AI_LAB_GPUS ?: '4'
+                    env.AI_LAB_CPUS = params.AI_LAB_CPUS ?: '8'
+                    env.AI_LAB_TIME_LIMIT = params.AI_LAB_TIME_LIMIT ?: '04:00:00'
+
+                    env.WANDB_RUN_NAME = params.WANDB_RUN_NAME ?: ''
+                    env.CARBON_TRACKING = "${params.CARBON_TRACKING == null ? true : params.CARBON_TRACKING}"
+                    env.HARDWARE_TRACKING = "${params.HARDWARE_TRACKING == null ? true : params.HARDWARE_TRACKING}"
+                }
+            }
+        }
+
         stage('Prepare Python') {
             steps {
                 sh '''
@@ -111,10 +150,10 @@ pipeline {
         stage('Configure MinIO') {
             when {
                 anyOf {
-                    expression { return params.RUN_DVC_REPRO }
-                    expression { return params.RUN_TRAINING }
-                    expression { return params.PUSH_DVC }
-                    expression { return params.UPLOAD_READABLE_ARTIFACTS }
+                    expression { return env.RUN_DVC_REPRO == 'true' }
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.PUSH_DVC == 'true' }
+                    expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
             }
             steps {
@@ -155,8 +194,8 @@ pipeline {
         stage('Show MinIO Context') {
             when {
                 anyOf {
-                    expression { return params.RUN_TRAINING }
-                    expression { return params.UPLOAD_READABLE_ARTIFACTS }
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
             }
             steps {
@@ -203,10 +242,10 @@ PY
         stage('Restore DVC Data') {
             when {
                 anyOf {
-                    expression { return params.RUN_DVC_REPRO }
-                    expression { return params.RUN_TRAINING }
-                    expression { return params.PUSH_DVC }
-                    expression { return params.UPLOAD_READABLE_ARTIFACTS }
+                    expression { return env.RUN_DVC_REPRO == 'true' }
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.PUSH_DVC == 'true' }
+                    expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
             }
             steps {
@@ -223,7 +262,7 @@ PY
 
         stage('DVC Repro') {
             when {
-                expression { return params.RUN_DVC_REPRO }
+                expression { return env.RUN_DVC_REPRO == 'true' }
             }
             steps {
                 sh '''
@@ -236,7 +275,7 @@ PY
 
         stage('Generate Runtime Config') {
             when {
-                expression { return params.RUN_TRAINING }
+                expression { return env.RUN_TRAINING == 'true' }
             }
             steps {
                 sh '''
@@ -256,8 +295,8 @@ PY
         stage('Train on DAKI Worker') {
             when {
                 allOf {
-                    expression { return params.RUN_TRAINING }
-                    expression { return params.TRAIN_RUNNER == 'DAKI_WORKER' }
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.TRAIN_RUNNER == 'DAKI_WORKER' }
                 }
             }
             steps {
@@ -278,8 +317,8 @@ PY
         stage('Train on AI Lab') {
             when {
                 allOf {
-                    expression { return params.RUN_TRAINING }
-                    expression { return params.TRAIN_RUNNER == 'AI_LAB' }
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.TRAIN_RUNNER == 'AI_LAB' }
                 }
             }
             steps {
@@ -379,7 +418,7 @@ REMOTE_SCRIPT
 
         stage('Update Model Archive') {
             when {
-                expression { return params.RUN_TRAINING }
+                expression { return env.RUN_TRAINING == 'true' }
             }
             steps {
                 sh '''
@@ -392,7 +431,7 @@ REMOTE_SCRIPT
 
         stage('DVC Push') {
             when {
-                expression { return params.PUSH_DVC }
+                expression { return env.PUSH_DVC == 'true' }
             }
             steps {
                 sh '''
@@ -404,7 +443,7 @@ REMOTE_SCRIPT
 
         stage('Readable Artifacts') {
             when {
-                expression { return params.UPLOAD_READABLE_ARTIFACTS }
+                expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
             }
             steps {
                 sh '''

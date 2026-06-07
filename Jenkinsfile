@@ -171,7 +171,7 @@ pipeline {
             steps {
                 withCredentials([
                     sshUserPrivateKey(
-                        credentialsId: 'powerconsumption_aau-ai-lab',
+                        credentialsId: 'energyconsumption_ai-lab',
                         keyFileVariable: 'AI_LAB_SSH_KEY',
                         usernameVariable: 'AI_LAB_SSH_USER'
                     ),

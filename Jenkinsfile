@@ -15,7 +15,7 @@ pipeline {
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
         booleanParam(name: 'RUN_TRAINING', defaultValue: true, description: 'Run GRU training.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
-        booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload raw, processed, model, and archive files under readable_artifacts/.')
+        booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.')
 
         booleanParam(name: 'DO_TRAIN', defaultValue: true, description: 'Run the training loop.')
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.')

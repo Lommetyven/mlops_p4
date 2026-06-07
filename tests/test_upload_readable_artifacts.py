@@ -3,7 +3,21 @@ from pathlib import Path
 from scripts.upload_readable_artifacts import (
     collect_file_metadata,
     load_minio_credentials,
+    remove_stale_archive_uploads,
 )
+
+
+class FakeFilesystem:
+    def __init__(self, existing_paths):
+        self.existing_paths = set(existing_paths)
+        self.removed_paths = []
+
+    def exists(self, path):
+        return path in self.existing_paths
+
+    def rm(self, path):
+        self.existing_paths.remove(path)
+        self.removed_paths.append(path)
 
 
 def test_load_minio_credentials_from_dvc_config_local(tmp_path, monkeypatch):
@@ -43,3 +57,31 @@ def test_collect_file_metadata_contains_human_readable_s3_key(tmp_path):
     assert metadata["s3_key"] == "readable_artifacts/processed/files/sample.csv"
     assert metadata["size_bytes"] > 0
     assert len(metadata["sha256"]) == 64
+
+
+def test_remove_stale_archive_uploads_removes_only_readable_archives():
+    filesystem = FakeFilesystem(
+        {
+            "energyconsumption/readable_artifacts/raw/raw.tar.gz",
+            "energyconsumption/readable_artifacts/processed/processed.tar.gz",
+            "energyconsumption/readable_artifacts/models/models.tar.gz",
+            "energyconsumption/readable_artifacts/models/files/model.pt",
+            "energyconsumption/dvc/files/md5/ab/archive",
+        }
+    )
+
+    remove_stale_archive_uploads(
+        filesystem,
+        bucket="energyconsumption",
+        prefix="readable_artifacts",
+    )
+
+    assert filesystem.removed_paths == [
+        "energyconsumption/readable_artifacts/raw/raw.tar.gz",
+        "energyconsumption/readable_artifacts/processed/processed.tar.gz",
+        "energyconsumption/readable_artifacts/models/models.tar.gz",
+    ]
+    assert "energyconsumption/readable_artifacts/models/files/model.pt" in (
+        filesystem.existing_paths
+    )
+    assert "energyconsumption/dvc/files/md5/ab/archive" in filesystem.existing_paths

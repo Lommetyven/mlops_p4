@@ -106,6 +106,19 @@ def upload_directory(filesystem, local_directory, bucket, prefix):
     return uploads
 
 
+def remove_stale_archive_uploads(filesystem, bucket, prefix):
+    stale_archive_keys = [
+        f"{prefix}/raw/raw.tar.gz",
+        f"{prefix}/processed/processed.tar.gz",
+        f"{prefix}/models/models.tar.gz",
+    ]
+    for key in stale_archive_keys:
+        destination = f"{bucket}/{key}"
+        if filesystem.exists(destination):
+            filesystem.rm(destination)
+            print(f"Removed stale readable archive s3://{destination}")
+
+
 def upload_manifest(filesystem, manifest, bucket, prefix):
     manifest_path = Path("data/dvc_archives/readable_artifacts_manifest.json")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,15 +158,7 @@ def upload_readable_artifacts(
             upload_directory(filesystem, local_directory, bucket, s3_prefix)
         )
 
-    archive_plan = [
-        ("data/dvc_archives/raw.tar.gz", f"{prefix}/raw/raw.tar.gz"),
-        ("data/dvc_archives/processed.tar.gz", f"{prefix}/processed/processed.tar.gz"),
-        ("data/dvc_archives/models.tar.gz", f"{prefix}/models/models.tar.gz"),
-    ]
-    for local_path, key in archive_plan:
-        metadata = upload_file(filesystem, local_path, bucket, key)
-        if metadata is not None:
-            manifest["uploads"].append(metadata)
+    remove_stale_archive_uploads(filesystem, bucket, prefix)
 
     upload_manifest(filesystem, manifest, bucket, prefix)
     return manifest

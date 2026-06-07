@@ -175,11 +175,6 @@ pipeline {
                         keyFileVariable: 'AI_LAB_SSH_KEY',
                         usernameVariable: 'AI_LAB_SSH_USER'
                     ),
-                    usernamePassword(
-                        credentialsId: 'energyconsumption_minio',
-                        usernameVariable: 'MINIO_ACCESS_KEY',
-                        passwordVariable: 'MINIO_SECRET_KEY'
-                    ),
                     string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
                 ]) {
                     sh '''
@@ -187,21 +182,16 @@ pipeline {
                         set -eu
                         mkdir -p reports
 
-                        MINIO_ACCESS_KEY_B64="$(printf '%s' "$MINIO_ACCESS_KEY" | base64 | tr -d '\n')"
-                        MINIO_SECRET_KEY_B64="$(printf '%s' "$MINIO_SECRET_KEY" | base64 | tr -d '\n')"
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="MINIO_ACCESS_KEY_B64='$MINIO_ACCESS_KEY_B64' MINIO_SECRET_KEY_B64='$MINIO_SECRET_KEY_B64' WANDB_API_KEY_B64='$WANDB_API_KEY_B64' DVC_REMOTE='$DVC_REMOTE' DVC_REMOTE_URL='$DVC_REMOTE_URL' AWS_ENDPOINT_URL='$AWS_ENDPOINT_URL' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' PUSH_DVC_PARAM='$PUSH_DVC' UPLOAD_READABLE_ARTIFACTS_PARAM='$UPLOAD_READABLE_ARTIFACTS' READABLE_ARTIFACTS_BUCKET='$READABLE_ARTIFACTS_BUCKET' READABLE_ARTIFACTS_PREFIX='$READABLE_ARTIFACTS_PREFIX'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH'"
 
                         ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'
 set -eu
 
-MINIO_ACCESS_KEY="$(printf '%s' "$MINIO_ACCESS_KEY_B64" | base64 -d)"
-MINIO_SECRET_KEY="$(printf '%s' "$MINIO_SECRET_KEY_B64" | base64 -d)"
 WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
-export MINIO_ACCESS_KEY MINIO_SECRET_KEY WANDB_API_KEY
-export DVC_REMOTE DVC_REMOTE_URL AWS_ENDPOINT_URL WANDB_ENTITY WANDB_PROJECT
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
 
 cd "$AI_LAB_REPO_PATH"
 git fetch origin main
@@ -220,35 +210,33 @@ fi
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 
-.venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" url "$DVC_REMOTE_URL"
-.venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" access_key_id "$MINIO_ACCESS_KEY"
-.venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" secret_access_key "$MINIO_SECRET_KEY"
-.venv/bin/python -m dvc remote modify --local "$DVC_REMOTE" endpointurl "$AWS_ENDPOINT_URL"
-
 if ! command -v sbatch >/dev/null 2>&1; then
     echo "sbatch is not available on $HOSTNAME; Jenkins must SSH to an AAU AI Lab login node." >&2
     exit 1
 fi
 
-mkdir -p reports
-sbatch --wait --export=ALL scripts/train_mode.sh
-export PATH="$PWD/.venv/bin:$PATH"
-.venv/bin/python -m dvc repro archive_models
-
-if [ "$PUSH_DVC_PARAM" = "true" ]; then
-    .venv/bin/python -m dvc push -r "$DVC_REMOTE"
-fi
-
-if [ "$UPLOAD_READABLE_ARTIFACTS_PARAM" = "true" ]; then
-    .venv/bin/python scripts/upload_readable_artifacts.py \
-        --remote-name "$DVC_REMOTE" \
-        --bucket "$READABLE_ARTIFACTS_BUCKET" \
-        --prefix "$READABLE_ARTIFACTS_PREFIX"
-fi
+mkdir -p data models reports
 REMOTE_SCRIPT
 
-                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/slurm-*.out" reports/ 2>/dev/null || true
-                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/slurm-*.err" reports/ 2>/dev/null || true
+                        tar -czf reports/ai_lab_data.tar.gz data
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" reports/ai_lab_data.tar.gz "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/"
+
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'
+set -eu
+
+WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
+
+cd "$AI_LAB_REPO_PATH"
+tar -xzf reports/ai_lab_data.tar.gz
+rm -f reports/ai_lab_data.tar.gz
+mkdir -p models reports
+sbatch --wait --export=ALL scripts/train_mode.sh
+tar --exclude=reports/ai_lab_results.tar.gz -czf reports/ai_lab_results.tar.gz models reports
+REMOTE_SCRIPT
+
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/ai_lab_results.tar.gz" reports/
+                        tar -xzf reports/ai_lab_results.tar.gz
                     '''
                 }
             }
@@ -261,7 +249,8 @@ REMOTE_SCRIPT
             steps {
                 sh '''
                     set -eu
-                    echo "Model archive is created on AAU AI Lab during the Train stage."
+                    export PATH="$PWD/.venv/bin:$PATH"
+                    .venv/bin/python -m dvc repro archive_models
                 '''
             }
         }

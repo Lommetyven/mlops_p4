@@ -43,7 +43,6 @@ pipeline {
         READABLE_ARTIFACTS_BUCKET = 'energyconsumption'
         READABLE_ARTIFACTS_PREFIX = 'readable_artifacts'
         AI_LAB_HOST = 'ailab-fe01.srv.aau.dk'
-        AI_LAB_SSH_USER = 'sl38ze'
         AI_LAB_REPO_PATH = '/ceph/home/student.aau.dk/sl38ze/MLOps/mlops_p4'
         WANDB_ENTITY = 'tobiasr-aalborg-universitet'
         WANDB_PROJECT = 'MLOps'
@@ -174,7 +173,7 @@ pipeline {
                     sshUserPrivateKey(
                         credentialsId: 'energyconsumption_ai-lab',
                         keyFileVariable: 'AI_LAB_SSH_KEY',
-                        usernameVariable: 'AI_LAB_CREDENTIAL_USER'
+                        usernameVariable: 'AI_LAB_SSH_USER'
                     ),
                     usernamePassword(
                         credentialsId: 'energyconsumption_minio',
@@ -192,7 +191,7 @@ pipeline {
                         MINIO_SECRET_KEY_B64="$(printf '%s' "$MINIO_SECRET_KEY" | base64 | tr -d '\n')"
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
-                        SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+                        SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
                         REMOTE_ENV="MINIO_ACCESS_KEY_B64='$MINIO_ACCESS_KEY_B64' MINIO_SECRET_KEY_B64='$MINIO_SECRET_KEY_B64' WANDB_API_KEY_B64='$WANDB_API_KEY_B64' DVC_REMOTE='$DVC_REMOTE' DVC_REMOTE_URL='$DVC_REMOTE_URL' AWS_ENDPOINT_URL='$AWS_ENDPOINT_URL' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' PUSH_DVC_PARAM='$PUSH_DVC' UPLOAD_READABLE_ARTIFACTS_PARAM='$UPLOAD_READABLE_ARTIFACTS' READABLE_ARTIFACTS_BUCKET='$READABLE_ARTIFACTS_BUCKET' READABLE_ARTIFACTS_PREFIX='$READABLE_ARTIFACTS_PREFIX'"
 
                         ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'

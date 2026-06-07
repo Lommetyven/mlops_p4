@@ -29,7 +29,8 @@ pipeline {
         string(name: 'SEQUENCE_LENGTH', defaultValue: '', description: 'Optional sequence length override. Blank uses config.')
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.')
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
-        choice(name: 'FLOAT_PRECISION', choices: ['float32', 'float16'], description: 'Training precision. float16 uses CUDA mixed precision.')
+        booleanParam(name: 'AUTOMATIC_MIXED_PRECISION', defaultValue: false, description: 'Enable CUDA automatic mixed precision with float16 autocast.')
+        choice(name: 'FLOAT_PRECISION', choices: ['float16', 'float32'], description: 'Numeric precision used when automatic mixed precision is enabled.')
 
         string(name: 'DATASET_PATH', defaultValue: '', description: 'Optional processed dataset path, e.g. data/processed/household_power_gru.csv. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
@@ -37,6 +38,7 @@ pipeline {
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.')
 
         choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.')
+        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.')
         choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2'], description: 'AI Lab Slurm GPU count.')
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.')
         choice(
@@ -88,7 +90,8 @@ pipeline {
                     env.SEQUENCE_LENGTH = params.SEQUENCE_LENGTH ?: ''
                     env.LEARNING_RATE = params.LEARNING_RATE ?: ''
                     env.WEIGHT_DECAY = params.WEIGHT_DECAY ?: ''
-                    env.FLOAT_PRECISION = params.FLOAT_PRECISION ?: ''
+                    env.AUTOMATIC_MIXED_PRECISION = "${params.AUTOMATIC_MIXED_PRECISION == null ? false : params.AUTOMATIC_MIXED_PRECISION}"
+                    env.FLOAT_PRECISION = env.AUTOMATIC_MIXED_PRECISION == 'true' ? (params.FLOAT_PRECISION ?: 'float16') : ''
 
                     env.DATASET_PATH = params.DATASET_PATH ?: ''
                     env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''
@@ -97,6 +100,7 @@ pipeline {
 
                     env.TRAIN_RUNNER = params.TRAIN_RUNNER ?: 'AI_LAB'
                     env.TRAIN_DISTRIBUTED = env.TRAIN_RUNNER == 'AI_LAB' ? 'true' : 'false'
+                    env.AI_LAB_NODES = params.AI_LAB_NODES ?: '1'
                     env.AI_LAB_GPUS = params.AI_LAB_GPUS ?: '4'
                     env.AI_LAB_CPUS = params.AI_LAB_CPUS ?: '8'
                     env.AI_LAB_TIME_LIMIT = params.AI_LAB_TIME_LIMIT ?: '04:00:00'
@@ -338,7 +342,7 @@ PY
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_NODES='$AI_LAB_NODES' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT'"
 
                         tar -czf reports/ai_lab_code.tar.gz \
                             configs \
@@ -401,10 +405,11 @@ rm -f reports/ai_lab_data.tar.gz
 mkdir -p models reports
 sbatch \
     --wait \
+    --nodes="${AI_LAB_NODES}" \
     --gres="gpu:${AI_LAB_GPUS}" \
     --cpus-per-task="${AI_LAB_CPUS}" \
     --time="${AI_LAB_TIME_LIMIT}" \
-    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED" \
+    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED",TORCHRUN_NNODES="$AI_LAB_NODES",TORCHRUN_NPROC_PER_NODE="$AI_LAB_GPUS" \
     scripts/train_mode.sh
 tar --exclude=reports/ai_lab_results.tar.gz -czf reports/ai_lab_results.tar.gz models reports
 REMOTE_SCRIPT

@@ -51,6 +51,7 @@ def test_train_config_yaml_has_required_sections():
         "seed",
         "device",
         "distributed",
+        "amp_enabled",
         "precision",
         "run_train",
         "run_validation",

@@ -59,6 +59,12 @@ def build_runtime_config(base_config, monitoring_config_path):
     config["training"]["run_validation"] = env_bool("DO_VALIDATE", True)
     config["training"]["run_test"] = env_bool("DO_TEST", True)
     config["training"]["distributed"] = env_bool("TRAIN_DISTRIBUTED", True)
+    config["training"]["amp_enabled"] = env_bool(
+        "AUTOMATIC_MIXED_PRECISION",
+        bool(config["training"].get("amp_enabled", False)),
+    )
+    if config["training"]["amp_enabled"] and not os.getenv("FLOAT_PRECISION"):
+        config["training"]["precision"] = "float16"
 
     config.setdefault("monitoring", {})["enabled"] = env_bool("WANDB_ENABLED", True)
     config["monitoring"]["config_path"] = str(monitoring_config_path)

@@ -31,6 +31,26 @@ def test_build_runtime_config_applies_parameter_overrides(monkeypatch, tmp_path)
     assert config["carbon_tracking"]["enabled"] is True
 
 
+def test_build_runtime_config_enables_amp_with_default_float16(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTOMATIC_MIXED_PRECISION", "true")
+    monkeypatch.delenv("FLOAT_PRECISION", raising=False)
+
+    config = build_runtime_config(
+        {
+            "training": {
+                "precision": "float32",
+                "amp_enabled": False,
+            },
+            "monitoring": {},
+            "carbon_tracking": {},
+        },
+        monitoring_config_path=tmp_path / "monitoring.yaml",
+    )
+
+    assert config["training"]["amp_enabled"] is True
+    assert config["training"]["precision"] == "float16"
+
+
 def test_build_monitoring_config_applies_run_name_and_hardware(monkeypatch):
     monkeypatch.setenv("WANDB_RUN_NAME", "jenkins-ddp")
     monkeypatch.setenv("HARDWARE_TRACKING", "false")

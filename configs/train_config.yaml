@@ -49,6 +49,7 @@ training:
   seed: 42
   device: "auto"
   distributed: true
+  amp_enabled: false
   precision: "float32"
   run_train: true
   run_validation: true

@@ -84,6 +84,7 @@ DEFAULT_CONFIG = {
         "seed": 42,
         "device": "auto",
         "distributed": True,
+        "amp_enabled": False,
         "precision": "float32",
         "run_train": True,
         "run_validation": True,
@@ -417,6 +418,7 @@ def build_tracking_metadata(
         "training/rank": distributed_context["rank"],
         "training/world_size": distributed_context["world_size"],
         "training/gpu_count": torch.cuda.device_count() if device.type == "cuda" else 0,
+        "training/amp_enabled": 1 if config["training"].get("amp_enabled") else 0,
         "training/precision": config["training"].get("precision", "float32"),
         "training/sequence_count": sequence_count,
         "training/train_split_size": split_sizes["train"],
@@ -576,6 +578,7 @@ def render_model_card(
                 ("Distributed", bool(tracking_metadata.get("training/distributed"))),
                 ("World size", tracking_metadata.get("training/world_size")),
                 ("GPU count", tracking_metadata.get("training/gpu_count")),
+                ("Automatic mixed precision", training_config.get("amp_enabled")),
                 ("Precision", tracking_metadata.get("training/precision")),
             ]
         ),
@@ -679,6 +682,7 @@ def log_final_tracking_outputs(
     best_epoch,
     best_metric,
     precision="float32",
+    amp_enabled=False,
 ):
     task_config = config.get("task", {})
     task_type = task_config.get("type", "regression").lower()
@@ -695,6 +699,7 @@ def log_final_tracking_outputs(
         device=device,
         task_config=task_config,
         precision=precision,
+        amp_enabled=amp_enabled,
     )
     final_step = int(config["training"]["epochs"]) + 1
     checkpoint_hash = (
@@ -754,12 +759,13 @@ def train_one_epoch(
     device,
     gradient_clip_norm,
     precision="float32",
+    amp_enabled=False,
     scaler=None,
 ):
     model.train()
     total_loss = 0.0
     total_samples = 0
-    use_autocast = autocast_enabled(device, precision)
+    use_autocast = autocast_enabled(device, precision, amp_enabled)
 
     for features, targets in train_loader:
         features = features.to(device)
@@ -793,7 +799,13 @@ def train_one_epoch(
 
 
 def evaluate(
-    model, data_loader, criterion, device, task_config=None, precision="float32"
+    model,
+    data_loader,
+    criterion,
+    device,
+    task_config=None,
+    precision="float32",
+    amp_enabled=False,
 ):
     if data_loader is None:
         return {}
@@ -810,7 +822,7 @@ def evaluate(
             targets = targets.to(device)
             with torch.autocast(
                 device_type=device.type,
-                enabled=autocast_enabled(device, precision),
+                enabled=autocast_enabled(device, precision, amp_enabled),
             ):
                 predictions = model(features)
                 loss = criterion(predictions, targets)
@@ -1000,8 +1012,12 @@ def normalize_precision(value):
     return aliases[precision]
 
 
-def autocast_enabled(device, precision):
-    return device.type == "cuda" and normalize_precision(precision) == "float16"
+def autocast_enabled(device, precision, amp_enabled=False):
+    return (
+        bool(amp_enabled)
+        and device.type == "cuda"
+        and normalize_precision(precision) == "float16"
+    )
 
 
 def save_checkpoint(path, model, optimizer, epoch, best_metric, config):
@@ -1041,6 +1057,7 @@ def main(config_path="configs/train_config.yaml"):
     seed_everything(int(training_config["seed"]))
     device = resolve_device(training_config["device"], distributed_context)
     precision = normalize_precision(training_config.get("precision", "float32"))
+    amp_enabled = bool(training_config.get("amp_enabled", False))
     run_train = bool(training_config.get("run_train", True))
     run_validation = bool(training_config.get("run_validation", True))
     run_test = bool(training_config.get("run_test", True))
@@ -1049,7 +1066,9 @@ def main(config_path="configs/train_config.yaml"):
     model = maybe_distribute_model(model, device, distributed_context)
     criterion = build_criterion(training_config["loss"])
     optimizer = build_optimizer(model, training_config)
-    scaler = torch.cuda.amp.GradScaler(enabled=autocast_enabled(device, precision))
+    scaler = torch.cuda.amp.GradScaler(
+        enabled=autocast_enabled(device, precision, amp_enabled)
+    )
     train_loader, val_loader, test_loader, sequence_count, split_sizes = (
         build_dataloaders(config, distributed_context=distributed_context)
     )
@@ -1088,6 +1107,7 @@ def main(config_path="configs/train_config.yaml"):
         print(f"Device: {device}")
         print(f"Distributed: {distributed_context['distributed']}")
         print(f"World size: {distributed_context['world_size']}")
+        print(f"Automatic mixed precision: {amp_enabled}")
         print(f"Precision: {precision}")
         print(f"Sequences: {sequence_count}")
         print(f"Split sizes: {split_sizes}")
@@ -1121,6 +1141,7 @@ def main(config_path="configs/train_config.yaml"):
                     device=device,
                     gradient_clip_norm=float(training_config["gradient_clip_norm"]),
                     precision=precision,
+                    amp_enabled=amp_enabled,
                     scaler=scaler,
                 )
 
@@ -1137,6 +1158,7 @@ def main(config_path="configs/train_config.yaml"):
                         device=device,
                         task_config=config["task"],
                         precision=precision,
+                        amp_enabled=amp_enabled,
                     )
                     val_loss = val_metrics.get("loss") if val_metrics else None
 
@@ -1197,6 +1219,7 @@ def main(config_path="configs/train_config.yaml"):
                     best_epoch=best_epoch,
                     best_metric=best_metric,
                     precision=precision,
+                    amp_enabled=amp_enabled,
                 )
             else:
                 test_metrics = {}

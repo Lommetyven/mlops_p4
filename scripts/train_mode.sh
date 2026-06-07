@@ -43,9 +43,6 @@ fi
 PYTHON_BIN=.venv/bin/python
 
 echo "Using Python: $("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
-echo "Using DVC: $(.venv/bin/dvc --version)"
-
-.venv/bin/dvc pull -r "${DVC_REMOTE:-minio}"
 
 if [ -f data/dvc_archives/raw.tar.gz ]; then
     "$PYTHON_BIN" scripts/archive_paths.py unpack \

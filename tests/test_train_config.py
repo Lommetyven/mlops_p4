@@ -50,6 +50,7 @@ def test_train_config_yaml_has_required_sections():
         "num_workers",
         "seed",
         "device",
+        "data_parallel",
     ):
         assert key in training
 

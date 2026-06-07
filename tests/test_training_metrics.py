@@ -118,6 +118,4 @@ def test_write_model_card_creates_markdown_file(tmp_path):
     model_card_path = write_model_card(*_model_card_inputs(), output_path=output_path)
 
     assert model_card_path == output_path
-    assert output_path.read_text(encoding="utf-8").startswith(
-        "# Model Card: gru-test"
-    )
+    assert output_path.read_text(encoding="utf-8").startswith("# Model Card: gru-test")

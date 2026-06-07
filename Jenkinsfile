@@ -96,6 +96,7 @@ pipeline {
                     env.RANDOM_SEED = params.RANDOM_SEED ?: ''
 
                     env.TRAIN_RUNNER = params.TRAIN_RUNNER ?: 'AI_LAB'
+                    env.TRAIN_DISTRIBUTED = env.TRAIN_RUNNER == 'AI_LAB' ? 'true' : 'false'
                     env.AI_LAB_GPUS = params.AI_LAB_GPUS ?: '4'
                     env.AI_LAB_CPUS = params.AI_LAB_CPUS ?: '8'
                     env.AI_LAB_TIME_LIMIT = params.AI_LAB_TIME_LIMIT ?: '04:00:00'
@@ -307,8 +308,7 @@ PY
                         set +x
                         set -eu
                         export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT
-                        export TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
-                        scripts/train_mode.sh
+                        .venv/bin/python main.py --config "$TRAIN_CONFIG_PATH"
                     '''
                 }
             }

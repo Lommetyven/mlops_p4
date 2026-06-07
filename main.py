@@ -79,6 +79,7 @@ DEFAULT_CONFIG = {
         "num_workers": 0,
         "seed": 42,
         "device": "auto",
+        "data_parallel": True,
     },
     "checkpoint": {
         "output_path": "models/gru_model.pt",
@@ -147,6 +148,18 @@ def resolve_device(device_name):
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     return torch.device(device_name)
+
+
+def unwrap_model(model):
+    return model.module if isinstance(model, nn.DataParallel) else model
+
+
+def maybe_parallelize_model(model, device, training_config):
+    use_data_parallel = bool(training_config.get("data_parallel", True))
+    if device.type == "cuda" and use_data_parallel and torch.cuda.device_count() > 1:
+        return nn.DataParallel(model)
+
+    return model
 
 
 def build_criterion(loss_name):
@@ -291,7 +304,7 @@ def build_tracking_metadata(
     dataset_metadata = collect_dataset_metadata(dataset_path)
     git_metadata = dataset_metadata.get("git") or collect_git_metadata()
     dvc_metadata = dataset_metadata.get("dvc") or {}
-    parameter_breakdown = model.parameter_breakdown()
+    parameter_breakdown = unwrap_model(model).parameter_breakdown()
     dataset_hash = dataset_metadata.get("dataset/sha256")
     dvc_lock_hash = dvc_metadata.get("dvc_lock_sha256")
     model_version = config.get("experiment", {}).get("model_version", "unversioned")
@@ -319,6 +332,12 @@ def build_tracking_metadata(
         "config/sha256": file_sha256(config_path) if config_path.exists() else None,
         "training/random_seed": int(config["training"]["seed"]),
         "training/device": str(device),
+        "training/data_parallel": 1 if isinstance(model, nn.DataParallel) else 0,
+        "training/gpu_count": (
+            torch.cuda.device_count()
+            if device.type == "cuda" and isinstance(model, nn.DataParallel)
+            else 1
+        ),
         "training/sequence_count": sequence_count,
         "training/train_split_size": split_sizes["train"],
         "training/validation_split_size": split_sizes["validation"],
@@ -379,7 +398,7 @@ def load_checkpoint_into_model(path, model, device):
     except TypeError:
         checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    model.load_state_dict(checkpoint["model_state_dict"])
+    unwrap_model(model).load_state_dict(checkpoint["model_state_dict"])
     return checkpoint
 
 
@@ -681,14 +700,15 @@ def prefix_metrics(metrics, prefix):
 def save_checkpoint(path, model, optimizer, epoch, best_metric, config):
     checkpoint_path = Path(path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    unwrapped_model = unwrap_model(model)
     torch.save(
         {
             "epoch": epoch,
             "best_metric": best_metric,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": unwrapped_model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "config": config,
-            "parameter_breakdown": model.parameter_breakdown(),
+            "parameter_breakdown": unwrapped_model.parameter_breakdown(),
         },
         checkpoint_path,
     )
@@ -713,6 +733,7 @@ def main(config_path="configs/train_config.yaml"):
     device = resolve_device(training_config["device"])
 
     model = GruModel(**model_config).to(device)
+    model = maybe_parallelize_model(model, device, training_config)
     criterion = build_criterion(training_config["loss"])
     optimizer = build_optimizer(model, training_config)
     train_loader, val_loader, test_loader, sequence_count, split_sizes = (
@@ -740,13 +761,15 @@ def main(config_path="configs/train_config.yaml"):
     print(f"Loaded config: {config_path}")
     print(f"Processed data: {config['data']['processed_path']}")
     print(f"Device: {device}")
+    if isinstance(model, nn.DataParallel):
+        print(f"DataParallel GPUs: {torch.cuda.device_count()}")
     print(f"Sequences: {sequence_count}")
     print(f"Split sizes: {split_sizes}")
     print(f"Epochs: {training_config['epochs']}")
     print(f"Batch size: {training_config['batch_size']}")
     print(f"Sequence length: {training_config['sequence_length']}")
     print(f"Learning rate: {training_config['learning_rate']}")
-    print(f"Parameter breakdown: {model.parameter_breakdown()}")
+    print(f"Parameter breakdown: {unwrap_model(model).parameter_breakdown()}")
     if carbon_tracker is not None:
         print(
             "CarbonTracker: enabled "

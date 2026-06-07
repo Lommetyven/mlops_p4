@@ -52,3 +52,7 @@ models/**/*.pt
 models/**/*.pth
 models/**/*.pkl
 models/**/*.joblib
+
+# Built containers
+containers/build/
+*.sif

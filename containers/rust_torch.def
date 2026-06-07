@@ -1,0 +1,52 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+
+%labels
+    Author Lommetyven
+    Description Rust inference environment with PyTorch/libtorch for energy GRU
+
+%post
+    set -eu
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libssl-dev \
+        pkg-config \
+        python3 \
+        python3-pip
+    rm -rf /var/lib/apt/lists/*
+
+    curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+    /root/.cargo/bin/rustup default stable
+    /root/.cargo/bin/cargo --version
+    python - <<'PY'
+import torch
+print("torch", torch.__version__)
+PY
+
+    cat >/usr/local/bin/rust-torch-env <<'SH'
+#!/usr/bin/env bash
+set -eu
+export PATH="/root/.cargo/bin:${PATH}"
+export LIBTORCH_USE_PYTORCH=1
+TORCH_LIB="$(python - <<'PY'
+import pathlib
+import torch
+print(pathlib.Path(torch.__file__).resolve().parent / "lib")
+PY
+)"
+export LD_LIBRARY_PATH="${TORCH_LIB}:${LD_LIBRARY_PATH:-}"
+exec "$@"
+SH
+    chmod +x /usr/local/bin/rust-torch-env
+
+%environment
+    export PATH="/root/.cargo/bin:${PATH}"
+    export LIBTORCH_USE_PYTORCH=1
+
+%runscript
+    exec /usr/local/bin/rust-torch-env "$@"

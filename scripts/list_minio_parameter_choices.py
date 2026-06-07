@@ -2,12 +2,20 @@ import json
 from argparse import ArgumentParser
 from pathlib import Path
 
-from scripts.upload_readable_artifacts import (
-    DEFAULT_BUCKET,
-    DEFAULT_PREFIX,
-    build_s3_filesystem,
-    load_minio_credentials,
-)
+try:
+    from scripts.upload_readable_artifacts import (
+        DEFAULT_BUCKET,
+        DEFAULT_PREFIX,
+        build_s3_filesystem,
+        load_minio_credentials,
+    )
+except ModuleNotFoundError:
+    from upload_readable_artifacts import (
+        DEFAULT_BUCKET,
+        DEFAULT_PREFIX,
+        build_s3_filesystem,
+        load_minio_credentials,
+    )
 
 
 def normalize_key(path, bucket):

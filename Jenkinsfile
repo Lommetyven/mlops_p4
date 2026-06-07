@@ -29,8 +29,7 @@ pipeline {
         string(name: 'SEQUENCE_LENGTH', defaultValue: '', description: 'Optional sequence length override. Blank uses config.')
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.')
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
-        booleanParam(name: 'AUTOMATIC_MIXED_PRECISION', defaultValue: false, description: 'Enable CUDA automatic mixed precision with float16 autocast.')
-        choice(name: 'FLOAT_PRECISION', choices: ['float16', 'float32'], description: 'Numeric precision used when automatic mixed precision is enabled.')
+        choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.')
 
         string(name: 'DATASET_PATH', defaultValue: '', description: 'Optional processed dataset path, e.g. data/processed/household_power_gru.csv. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
@@ -90,8 +89,7 @@ pipeline {
                     env.SEQUENCE_LENGTH = params.SEQUENCE_LENGTH ?: ''
                     env.LEARNING_RATE = params.LEARNING_RATE ?: ''
                     env.WEIGHT_DECAY = params.WEIGHT_DECAY ?: ''
-                    env.AUTOMATIC_MIXED_PRECISION = "${params.AUTOMATIC_MIXED_PRECISION == null ? false : params.AUTOMATIC_MIXED_PRECISION}"
-                    env.FLOAT_PRECISION = env.AUTOMATIC_MIXED_PRECISION == 'true' ? (params.FLOAT_PRECISION ?: 'float16') : ''
+                    env.PRECISION_MODE = params.PRECISION_MODE ?: 'float32'
 
                     env.DATASET_PATH = params.DATASET_PATH ?: ''
                     env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''

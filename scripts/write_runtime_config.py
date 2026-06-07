@@ -14,7 +14,6 @@ TRAINING_OVERRIDES = {
     "SEQUENCE_LENGTH": ("training", "sequence_length", int),
     "LEARNING_RATE": ("training", "learning_rate", float),
     "WEIGHT_DECAY": ("training", "weight_decay", float),
-    "FLOAT_PRECISION": ("training", "precision", str),
     "DATASET_PATH": ("data", "processed_path", str),
     "VALIDATION_SPLIT": ("training", "validation_split", float),
     "TEST_SPLIT": ("training", "test_split", float),
@@ -59,12 +58,7 @@ def build_runtime_config(base_config, monitoring_config_path):
     config["training"]["run_validation"] = env_bool("DO_VALIDATE", True)
     config["training"]["run_test"] = env_bool("DO_TEST", True)
     config["training"]["distributed"] = env_bool("TRAIN_DISTRIBUTED", True)
-    config["training"]["amp_enabled"] = env_bool(
-        "AUTOMATIC_MIXED_PRECISION",
-        bool(config["training"].get("amp_enabled", False)),
-    )
-    if config["training"]["amp_enabled"] and not os.getenv("FLOAT_PRECISION"):
-        config["training"]["precision"] = "float16"
+    apply_precision_mode(config)
 
     config.setdefault("monitoring", {})["enabled"] = env_bool("WANDB_ENABLED", True)
     config["monitoring"]["config_path"] = str(monitoring_config_path)
@@ -74,6 +68,26 @@ def build_runtime_config(base_config, monitoring_config_path):
     )
 
     return config
+
+
+def apply_precision_mode(config):
+    precision_mode = os.getenv("PRECISION_MODE")
+    if precision_mode is None or precision_mode == "":
+        return
+
+    precision_modes = {
+        "float32": (False, "float32"),
+        "amp_float16": (True, "float16"),
+        "amp_bfloat16": (True, "bfloat16"),
+    }
+    if precision_mode not in precision_modes:
+        raise ValueError(
+            "PRECISION_MODE must be one of float32, amp_float16, amp_bfloat16."
+        )
+
+    amp_enabled, precision = precision_modes[precision_mode]
+    config.setdefault("training", {})["amp_enabled"] = amp_enabled
+    config["training"]["precision"] = precision
 
 
 def build_monitoring_config(base_monitoring_config):

@@ -773,7 +773,11 @@ def train_one_epoch(
         targets = targets.to(device)
 
         optimizer.zero_grad(set_to_none=True)
-        with torch.autocast(device_type=device.type, enabled=use_autocast):
+        with torch.autocast(
+            device_type=device.type,
+            dtype=autocast_dtype(precision),
+            enabled=use_autocast,
+        ):
             predictions = model(features)
             loss = criterion(predictions, targets)
 
@@ -823,6 +827,7 @@ def evaluate(
             targets = targets.to(device)
             with torch.autocast(
                 device_type=device.type,
+                dtype=autocast_dtype(precision),
                 enabled=autocast_enabled(device, precision, amp_enabled),
             ):
                 predictions = model(features)
@@ -1004,12 +1009,16 @@ def normalize_precision(value):
         "16": "float16",
         "fp16": "float16",
         "float16": "float16",
+        "bf16": "bfloat16",
+        "bfloat16": "bfloat16",
         "32": "float32",
         "fp32": "float32",
         "float32": "float32",
     }
     if precision not in aliases:
-        raise ValueError("training.precision must be one of float16 or float32.")
+        raise ValueError(
+            "training.precision must be one of float32, float16, or bfloat16."
+        )
     return aliases[precision]
 
 
@@ -1017,6 +1026,20 @@ def autocast_enabled(device, precision, amp_enabled=False):
     return (
         bool(amp_enabled)
         and device.type == "cuda"
+        and normalize_precision(precision) != "float32"
+    )
+
+
+def autocast_dtype(precision):
+    precision = normalize_precision(precision)
+    if precision == "bfloat16":
+        return torch.bfloat16
+    return torch.float16
+
+
+def scaler_enabled(device, precision, amp_enabled=False):
+    return (
+        autocast_enabled(device, precision, amp_enabled)
         and normalize_precision(precision) == "float16"
     )
 
@@ -1080,7 +1103,7 @@ def main(config_path="configs/train_config.yaml"):
     criterion = build_criterion(training_config["loss"])
     optimizer = build_optimizer(model, training_config)
     scaler = torch.cuda.amp.GradScaler(
-        enabled=autocast_enabled(device, precision, amp_enabled)
+        enabled=scaler_enabled(device, precision, amp_enabled)
     )
     train_loader, val_loader, test_loader, sequence_count, split_sizes = (
         build_dataloaders(config, distributed_context=distributed_context)

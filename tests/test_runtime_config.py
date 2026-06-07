@@ -4,7 +4,7 @@ from scripts.write_runtime_config import build_monitoring_config, build_runtime_
 def test_build_runtime_config_applies_parameter_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("EPOCHS", "7")
     monkeypatch.setenv("BATCH_SIZE", "128")
-    monkeypatch.setenv("FLOAT_PRECISION", "float16")
+    monkeypatch.setenv("PRECISION_MODE", "amp_float16")
     monkeypatch.setenv("DATASET_PATH", "data/processed/custom.csv")
     monkeypatch.setenv("DO_TEST", "false")
     monkeypatch.setenv("CARBON_TRACKING", "true")
@@ -25,15 +25,15 @@ def test_build_runtime_config_applies_parameter_overrides(monkeypatch, tmp_path)
 
     assert config["training"]["epochs"] == 7
     assert config["training"]["batch_size"] == 128
+    assert config["training"]["amp_enabled"] is True
     assert config["training"]["precision"] == "float16"
     assert config["training"]["run_test"] is False
     assert config["data"]["processed_path"] == "data/processed/custom.csv"
     assert config["carbon_tracking"]["enabled"] is True
 
 
-def test_build_runtime_config_enables_amp_with_default_float16(monkeypatch, tmp_path):
-    monkeypatch.setenv("AUTOMATIC_MIXED_PRECISION", "true")
-    monkeypatch.delenv("FLOAT_PRECISION", raising=False)
+def test_build_runtime_config_applies_amp_bfloat16(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRECISION_MODE", "amp_bfloat16")
 
     config = build_runtime_config(
         {
@@ -48,7 +48,26 @@ def test_build_runtime_config_enables_amp_with_default_float16(monkeypatch, tmp_
     )
 
     assert config["training"]["amp_enabled"] is True
-    assert config["training"]["precision"] == "float16"
+    assert config["training"]["precision"] == "bfloat16"
+
+
+def test_build_runtime_config_applies_float32_precision_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRECISION_MODE", "float32")
+
+    config = build_runtime_config(
+        {
+            "training": {
+                "precision": "bfloat16",
+                "amp_enabled": True,
+            },
+            "monitoring": {},
+            "carbon_tracking": {},
+        },
+        monitoring_config_path=tmp_path / "monitoring.yaml",
+    )
+
+    assert config["training"]["amp_enabled"] is False
+    assert config["training"]["precision"] == "float32"
 
 
 def test_build_monitoring_config_applies_run_name_and_hardware(monkeypatch):

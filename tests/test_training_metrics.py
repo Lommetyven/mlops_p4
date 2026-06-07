@@ -1,12 +1,13 @@
 import pytest
-
-pytest.importorskip("torch")
+import torch
 
 from main import (
+    autocast_dtype,
     compute_classification_metrics,
     compute_regression_metrics,
     prefix_metrics,
     render_model_card,
+    scaler_enabled,
     write_model_card,
 )
 
@@ -50,6 +51,16 @@ def test_prefix_metrics_keeps_only_scalar_values():
     )
 
     assert metrics == {"test/loss": 0.5}
+
+
+def test_precision_helpers_support_amp_modes():
+    assert autocast_dtype("float16") == torch.float16
+    assert autocast_dtype("bfloat16") == torch.bfloat16
+    assert autocast_dtype("bf16") == torch.bfloat16
+    assert scaler_enabled(torch.device("cuda"), "float16", amp_enabled=True) is True
+    assert scaler_enabled(torch.device("cuda"), "bfloat16", amp_enabled=True) is False
+    assert scaler_enabled(torch.device("cuda"), "float32", amp_enabled=True) is False
+    assert scaler_enabled(torch.device("cpu"), "float16", amp_enabled=True) is False
 
 
 def _model_card_inputs():

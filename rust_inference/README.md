@@ -26,6 +26,21 @@ cargo run --release -- \
 The binary uses the `tch` crate and requires libtorch/PyTorch native libraries
 available on the machine where it is built and run.
 
+## DAKI Worker Docker Container
+
+The DAKI worker can run Rust inference through Docker when `cargo` is not
+installed directly on the worker:
+
+```bash
+MODEL=models/gru_model_torchscript.pt \
+INPUT=reports/inference_window.csv \
+bash scripts/rust_inference_docker.sh run
+```
+
+The Docker image is built from `containers/rust_torch.Dockerfile` the first time
+it is needed. It mounts the current workspace, builds the Rust binary, and runs
+inference against the mounted TorchScript model and CSV window.
+
 ## AI Lab Singularity Container
 
 AI Lab runs containers with Singularity. Build the Rust + PyTorch image from the

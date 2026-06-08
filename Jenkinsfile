@@ -593,13 +593,18 @@ REMOTE_SCRIPT
                                 --model ../models/gru_model_torchscript.pt \
                                 --input ../reports/inference_window.csv
                         ) | tee reports/rust_inference_output.txt
+                    elif command -v docker >/dev/null 2>&1; then
+                        MODEL=models/gru_model_torchscript.pt \
+                        INPUT=reports/inference_window.csv \
+                        bash scripts/rust_inference_docker.sh run \
+                            | tee reports/rust_inference_output.txt
                     elif [ -f containers/build/rust_torch.sif ]; then
                         MODEL="$PWD/models/gru_model_torchscript.pt" \
                         INPUT="$PWD/reports/inference_window.csv" \
                         bash scripts/rust_inference_container.sh run \
                             | tee reports/rust_inference_output.txt
                     else
-                        echo "No Rust runtime available. Install cargo or build the Singularity image first." >&2
+                        echo "No Rust runtime available. Install cargo, enable Docker, or build the Singularity image first." >&2
                         exit 1
                     fi
                 '''

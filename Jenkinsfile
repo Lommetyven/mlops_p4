@@ -114,7 +114,7 @@ pipeline {
         PYTHONUNBUFFERED = '1'
         DVC_REMOTE = 'minio'
         DVC_REMOTE_URL = 's3://energyconsumption/dvc'
-        AWS_ENDPOINT_URL = 'http://172.24.198.42:9001'
+        AWS_ENDPOINT_URL = 'http://172.24.198.42:9000'
         READABLE_ARTIFACTS_BUCKET = 'energyconsumption'
         READABLE_ARTIFACTS_PREFIX = 'readable_artifacts'
         DAKI_DOCKER_REGISTRY = '172.24.198.42:5000'

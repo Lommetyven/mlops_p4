@@ -18,17 +18,19 @@ s3://energyconsumption/readable_artifacts
 That prefix contains named raw data, processed data, model files, tar archives,
 and a `manifest.json` with sizes and SHA256 hashes.
 
-The MinIO API endpoint is:
+The MinIO S3 API endpoint for DVC, `s3fs`, and Jenkins is:
 
 ```text
-http://172.24.198.42:9001
+http://172.24.198.42:9000
 ```
 
-The browser UI is:
+The browser UI for humans is separate:
 
 ```text
 http://172.24.198.42:9001/browser/energyconsumption
 ```
+
+Do not use the `/browser/...` URL as an S3 endpoint.
 
 Do not use DVC garbage collection against the remote unless the team has agreed on it. `dvc push` and `dvc pull` are safe for normal use; they only operate through the configured `energyconsumption/dvc` prefix.
 

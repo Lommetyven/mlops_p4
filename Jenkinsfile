@@ -19,6 +19,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.'),
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.'),
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.'),
+        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.'),
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.'),
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.'),
 
@@ -70,6 +71,7 @@ pipeline {
         booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.')
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.')
+        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.')
 
@@ -131,6 +133,7 @@ pipeline {
                     env.REFRESH_MINIO_CHOICES = "${params.REFRESH_MINIO_CHOICES == null ? true : params.REFRESH_MINIO_CHOICES}"
                     env.RUN_DVC_REPRO = "${params.RUN_DVC_REPRO == null ? true : params.RUN_DVC_REPRO}"
                     env.RUN_TRAINING = "${params.RUN_TRAINING == null ? false : params.RUN_TRAINING}"
+                    env.RUN_INFERENCE = "${params.RUN_INFERENCE == null ? false : params.RUN_INFERENCE}"
                     env.PUSH_DVC = "${params.PUSH_DVC == null ? true : params.PUSH_DVC}"
                     env.UPLOAD_READABLE_ARTIFACTS = "${params.UPLOAD_READABLE_ARTIFACTS == null ? true : params.UPLOAD_READABLE_ARTIFACTS}"
 
@@ -213,6 +216,7 @@ pipeline {
                     expression { return env.REFRESH_MINIO_CHOICES == 'true' }
                     expression { return env.RUN_DVC_REPRO == 'true' }
                     expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.RUN_INFERENCE == 'true' }
                     expression { return env.PUSH_DVC == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
@@ -299,6 +303,7 @@ pipeline {
             when {
                 anyOf {
                     expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.RUN_INFERENCE == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
             }
@@ -348,6 +353,7 @@ PY
                 anyOf {
                     expression { return env.RUN_DVC_REPRO == 'true' }
                     expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.RUN_INFERENCE == 'true' }
                     expression { return env.PUSH_DVC == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
@@ -379,7 +385,10 @@ PY
 
         stage('Generate Runtime Config') {
             when {
-                expression { return env.RUN_TRAINING == 'true' }
+                anyOf {
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.RUN_INFERENCE == 'true' }
+                }
             }
             steps {
                 sh '''
@@ -520,15 +529,79 @@ REMOTE_SCRIPT
             }
         }
 
+        stage('Prepare Inference Input') {
+            when {
+                expression { return env.RUN_INFERENCE == 'true' }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    mkdir -p reports
+                    .venv/bin/python scripts/extract_inference_window.py \
+                        --config "$TRAIN_CONFIG_PATH" \
+                        --output reports/inference_window.csv
+                    echo "Prepared inference input:"
+                    sed -n '1,8p' reports/inference_window.csv
+                '''
+            }
+        }
+
         stage('Update Model Archive') {
             when {
-                expression { return env.RUN_TRAINING == 'true' }
+                anyOf {
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.RUN_INFERENCE == 'true' }
+                }
             }
             steps {
                 sh '''
                     set -eu
                     export PATH="$PWD/.venv/bin:$PATH"
+                    if [ ! -f models/gru_model_torchscript.pt ] && [ -f models/gru_model.pt ]; then
+                        .venv/bin/python scripts/export_torchscript.py \
+                            --config "$TRAIN_CONFIG_PATH" \
+                            --checkpoint models/gru_model.pt \
+                            --output models/gru_model_torchscript.pt
+                    fi
                     .venv/bin/python -m dvc repro archive_models
+                '''
+            }
+        }
+
+        stage('Run Inference') {
+            when {
+                expression { return env.RUN_INFERENCE == 'true' }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    mkdir -p reports
+
+                    if [ ! -f models/gru_model_torchscript.pt ]; then
+                        echo "TorchScript model not found at models/gru_model_torchscript.pt" >&2
+                        exit 1
+                    fi
+                    if [ ! -f reports/inference_window.csv ]; then
+                        echo "Inference input not found at reports/inference_window.csv" >&2
+                        exit 1
+                    fi
+
+                    if command -v cargo >/dev/null 2>&1; then
+                        (
+                            cd rust_inference
+                            cargo run --release -- \
+                                --model ../models/gru_model_torchscript.pt \
+                                --input ../reports/inference_window.csv
+                        ) | tee reports/rust_inference_output.txt
+                    elif [ -f containers/build/rust_torch.sif ]; then
+                        MODEL="$PWD/models/gru_model_torchscript.pt" \
+                        INPUT="$PWD/reports/inference_window.csv" \
+                        bash scripts/rust_inference_container.sh run \
+                            | tee reports/rust_inference_output.txt
+                    else
+                        echo "No Rust runtime available. Install cargo or build the Singularity image first." >&2
+                        exit 1
+                    fi
                 '''
             }
         }
@@ -574,7 +647,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

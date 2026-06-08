@@ -206,6 +206,22 @@ def unwrap_model(model):
     )
 
 
+def _clear_module_hooks(module):
+    for hook_name in (
+        "_forward_hooks",
+        "_forward_pre_hooks",
+        "_backward_hooks",
+        "_forward_hooks_with_kwargs",
+        "_forward_pre_hooks_with_kwargs",
+    ):
+        hooks = getattr(module, hook_name, None)
+        if hooks is not None:
+            hooks.clear()
+
+    for child_module in module.children():
+        _clear_module_hooks(child_module)
+
+
 def maybe_distribute_model(model, device, distributed_context):
     if not distributed_context.get("distributed"):
         return model
@@ -1064,7 +1080,8 @@ def save_checkpoint(path, model, optimizer, epoch, best_metric, config):
 def export_torchscript_model(model, output_path, sequence_length, device):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    evaluation_model = unwrap_model(model).to(device)
+    evaluation_model = deepcopy(unwrap_model(model)).to(device)
+    _clear_module_hooks(evaluation_model)
     evaluation_model.eval()
     _ = sequence_length
     with torch.no_grad():

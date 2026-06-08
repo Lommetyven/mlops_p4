@@ -41,6 +41,15 @@ The Docker image is built from `containers/rust_torch.Dockerfile` the first time
 it is needed. It mounts the current workspace, builds the Rust binary, and runs
 inference against the mounted TorchScript model and CSV window.
 
+Repeated Jenkins runs reuse the existing `mlops-p4-rust-inference:latest` image
+on the DAKI worker. The script rebuilds it only when the image is missing or the
+Dockerfile fingerprint changes. Build and runtime details are written to:
+
+```text
+reports/docker_rust_inference_build.txt
+reports/docker_rust_inference_metadata.txt
+```
+
 ## AI Lab Singularity Container
 
 AI Lab runs containers with Singularity. Build the Rust + PyTorch image from the

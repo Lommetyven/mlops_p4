@@ -1,5 +1,3 @@
-import groovy.json.JsonSlurperClassic
-
 def normalizeChoiceValues(values) {
     def choices = ['']
     if (values != null) {
@@ -275,22 +273,23 @@ pipeline {
                             --remote-name "$DVC_REMOTE" \
                             --bucket "$READABLE_ARTIFACTS_BUCKET" \
                             --prefix "$READABLE_ARTIFACTS_PREFIX" \
-                            --output reports/minio_parameter_choices.json
+                            --output reports/minio_parameter_choices.json \
+                            --datasets-output reports/minio_dataset_choices.txt \
+                            --model-versions-output reports/minio_model_version_choices.txt
                     '''
                     script {
-                        def choices = new JsonSlurperClassic().parseText(
-                            readFile('reports/minio_parameter_choices.json')
-                        )
+                        def datasets = readFile('reports/minio_dataset_choices.txt').split('\n')
+                        def modelVersions = readFile('reports/minio_model_version_choices.txt').split('\n')
                         properties([
                             buildDiscarder(logRotator(numToKeepStr: '20')),
                             pipelineTriggers([pollSCM('H/5 * * * *')]),
                             parameters(jobParameterDefinitions(
-                                choices.datasets ?: [''],
-                                choices.model_versions ?: ['']
+                                datasets,
+                                modelVersions
                             ))
                         ])
-                        echo "Refreshed Jenkins dataset choices: ${(choices.datasets ?: []).size()}"
-                        echo "Refreshed Jenkins model-version choices: ${(choices.model_versions ?: []).size()}"
+                        echo "Refreshed Jenkins dataset choices: ${normalizeChoiceValues(datasets).size() - 1}"
+                        echo "Refreshed Jenkins model-version choices: ${normalizeChoiceValues(modelVersions).size() - 1}"
                     }
                 }
             }
@@ -575,7 +574,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

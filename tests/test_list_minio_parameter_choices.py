@@ -1,7 +1,10 @@
 import io
 import json
 
-from scripts.list_minio_parameter_choices import build_parameter_choices
+from scripts.list_minio_parameter_choices import (
+    build_parameter_choices,
+    write_choice_file,
+)
 
 
 class FakeReadableFilesystem:
@@ -60,3 +63,13 @@ def test_build_parameter_choices_falls_back_to_listing_prefixes():
         "datasets": ["data/processed/a.csv", "data/processed/nested/b.csv"],
         "model_versions": ["run-a"],
     }
+
+
+def test_write_choice_file_uses_one_choice_per_line(tmp_path):
+    output_path = tmp_path / "choices.txt"
+
+    write_choice_file(output_path, ["data/processed/a.csv", "data/processed/b.csv"])
+
+    assert output_path.read_text(encoding="utf-8") == (
+        "data/processed/a.csv\ndata/processed/b.csv\n"
+    )

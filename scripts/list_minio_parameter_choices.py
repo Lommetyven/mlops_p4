@@ -98,12 +98,20 @@ def build_parameter_choices(filesystem, bucket=DEFAULT_BUCKET, prefix=DEFAULT_PR
     }
 
 
+def write_choice_file(path, choices):
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(choices) + "\n", encoding="utf-8")
+
+
 def main():
     parser = ArgumentParser()
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--remote-name", default="minio")
     parser.add_argument("--output", default="reports/minio_parameter_choices.json")
+    parser.add_argument("--datasets-output")
+    parser.add_argument("--model-versions-output")
     args = parser.parse_args()
 
     access_key, secret_key, endpoint_url = load_minio_credentials(args.remote_name)
@@ -117,6 +125,10 @@ def main():
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    if args.datasets_output:
+        write_choice_file(args.datasets_output, choices["datasets"])
+    if args.model_versions_output:
+        write_choice_file(args.model_versions_output, choices["model_versions"])
     print(json.dumps(choices, indent=2))
 
 

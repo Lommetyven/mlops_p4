@@ -10,7 +10,7 @@ import s3fs
 
 DEFAULT_BUCKET = "energyconsumption"
 DEFAULT_PREFIX = "readable_artifacts"
-DEFAULT_ENDPOINT_URL = "http://172.24.198.42:9000"
+DEFAULT_ENDPOINT_URL = "http://172.24.198.42:9001"
 
 
 def file_sha256(path):

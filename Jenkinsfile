@@ -114,9 +114,11 @@ pipeline {
         PYTHONUNBUFFERED = '1'
         DVC_REMOTE = 'minio'
         DVC_REMOTE_URL = 's3://energyconsumption/dvc'
-        AWS_ENDPOINT_URL = 'http://172.24.198.42:9000'
+        AWS_ENDPOINT_URL = 'http://172.24.198.42:9001'
         READABLE_ARTIFACTS_BUCKET = 'energyconsumption'
         READABLE_ARTIFACTS_PREFIX = 'readable_artifacts'
+        DAKI_DOCKER_REGISTRY = '172.24.198.42:5000'
+        RUST_TORCH_DOCKER_IMAGE = '172.24.198.42:5000/mlops-p4/rust-inference:latest'
         AI_LAB_HOST = 'ailab-fe01.srv.aau.dk'
         AI_LAB_REPO_PATH = '/ceph/home/student.aau.dk/sl38ze/MLOps/mlops_p4'
         WANDB_ENTITY = 'tobiasr-aalborg-universitet'
@@ -596,6 +598,7 @@ REMOTE_SCRIPT
                     elif command -v docker >/dev/null 2>&1; then
                         MODEL=models/gru_model_torchscript.pt \
                         INPUT=reports/inference_window.csv \
+                        RUST_TORCH_DOCKER_IMAGE="$RUST_TORCH_DOCKER_IMAGE" \
                         bash scripts/rust_inference_docker.sh run \
                             | tee reports/rust_inference_output.txt
                     elif [ -f containers/build/rust_torch.sif ]; then

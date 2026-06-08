@@ -37,17 +37,32 @@ INPUT=reports/inference_window.csv \
 bash scripts/rust_inference_docker.sh run
 ```
 
-The Docker image is built from `containers/rust_torch.Dockerfile` the first time
-it is needed. It mounts the current workspace, builds the Rust binary, and runs
-inference against the mounted TorchScript model and CSV window.
+The Docker image is pulled from the DAKI registry when available:
 
-Repeated Jenkins runs reuse the existing `mlops-p4-rust-inference:latest` image
-on the DAKI worker. The script rebuilds it only when the image is missing or the
-Dockerfile fingerprint changes. Build and runtime details are written to:
+```text
+172.24.198.42:5000/mlops-p4/rust-inference:latest
+```
+
+If the image is missing or its Dockerfile fingerprint is stale, it is rebuilt
+from `containers/rust_torch.Dockerfile` and pushed back to the registry. It
+mounts the current workspace, builds the Rust binary, and runs inference against
+the mounted TorchScript model and CSV window.
+
+Repeated Jenkins runs reuse the existing
+`172.24.198.42:5000/mlops-p4/rust-inference:latest` image locally or from the
+registry. The script rebuilds it only when the image is
+missing or the Dockerfile fingerprint changes. Build and runtime details are
+written to:
 
 ```text
 reports/docker_rust_inference_build.txt
 reports/docker_rust_inference_metadata.txt
+```
+
+To list only this project's local Docker images and containers on a DAKI worker:
+
+```bash
+bash scripts/list_daki_docker_resources.sh
 ```
 
 ## AI Lab Singularity Container

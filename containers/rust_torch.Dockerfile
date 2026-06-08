@@ -1,5 +1,9 @@
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
+LABEL org.mlops_p4.project="mlops_p4"
+LABEL org.mlops_p4.role="rust-inference"
+LABEL org.mlops_p4.repository="Lommetyven/mlops_p4"
+
 ENV LIBTORCH_USE_PYTORCH=1
 
 RUN apt-get update \

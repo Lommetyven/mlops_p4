@@ -21,7 +21,7 @@ and a `manifest.json` with sizes and SHA256 hashes.
 The MinIO API endpoint is:
 
 ```text
-http://172.24.198.42:9000
+http://172.24.198.42:9001
 ```
 
 The browser UI is:

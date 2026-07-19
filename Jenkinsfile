@@ -44,7 +44,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
 
         choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.'),
         choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.'),
-        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2'], description: 'AI Lab Slurm GPU count.'),
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab Slurm GPU count.'),
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.'),
         choice(name: 'AI_LAB_TIME_LIMIT', choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'], description: 'AI Lab Slurm max wall time.'),
 
@@ -96,7 +96,7 @@ pipeline {
 
         choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.')
         choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.')
-        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2'], description: 'AI Lab Slurm GPU count.')
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab Slurm GPU count.')
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.')
         choice(
             name: 'AI_LAB_TIME_LIMIT',

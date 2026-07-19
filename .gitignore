@@ -55,4 +55,5 @@ models/**/*.joblib
 
 # Built containers
 containers/build/
+rust_inference/target/
 *.sif

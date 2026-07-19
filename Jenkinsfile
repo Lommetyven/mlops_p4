@@ -62,6 +62,7 @@ pipeline {
         timestamps()
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20'))
+        skipDefaultCheckout(true)
     }
 
     triggers {
@@ -131,6 +132,33 @@ pipeline {
     }
 
     stages {
+        stage('Checkout SCM') {
+            steps {
+                sh '''
+                    set -eu
+
+                    if [ -d "$WORKSPACE/rust_inference/target" ]; then
+                        echo "Removing container-owned Rust build artifacts before checkout"
+                        if command -v docker >/dev/null 2>&1; then
+                            docker run --rm \
+                                -v "$WORKSPACE:/workspace" \
+                                --entrypoint /bin/rm \
+                                "$RUST_TORCH_DOCKER_IMAGE" \
+                                -rf /workspace/rust_inference/target
+                        else
+                            rm -rf "$WORKSPACE/rust_inference/target"
+                        fi
+                    fi
+
+                    if [ -e "$WORKSPACE/rust_inference/target" ]; then
+                        echo "Unable to remove $WORKSPACE/rust_inference/target" >&2
+                        exit 1
+                    fi
+                '''
+                checkout scm
+            }
+        }
+
         stage('Apply Parameter Defaults') {
             steps {
                 script {

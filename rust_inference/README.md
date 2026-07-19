@@ -45,8 +45,10 @@ The Docker image is pulled from the DAKI registry when available:
 
 If the image is missing or its Dockerfile fingerprint is stale, it is rebuilt
 from `containers/rust_torch.Dockerfile` and pushed back to the registry. It
-mounts the current workspace, builds the Rust binary, and runs inference against
-the mounted TorchScript model and CSV window.
+mounts the current workspace read-only, builds the Rust binary in the
+`mlops-p4-rust-target` Docker volume, and runs inference against the mounted
+TorchScript model and CSV window. Set `CARGO_TARGET_VOLUME` to override the
+volume name.
 
 Repeated Jenkins runs reuse the existing
 `172.24.198.42:5000/mlops-p4/rust-inference:latest` image locally or from the

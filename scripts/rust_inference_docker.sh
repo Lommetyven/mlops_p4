@@ -15,6 +15,7 @@ REPOSITORY_LABEL="org.mlops_p4.repository"
 PROJECT_LABEL_VALUE="mlops_p4"
 ROLE_LABEL_VALUE="rust-inference"
 REPOSITORY_LABEL_VALUE="Lommetyven/mlops_p4"
+CARGO_TARGET_VOLUME="${CARGO_TARGET_VOLUME:-mlops-p4-rust-target}"
 
 mkdir -p "$REPORT_DIR"
 
@@ -55,6 +56,7 @@ write_metadata() {
         echo "image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
         echo "image_created=$(docker image inspect -f '{{.Created}}' "$IMAGE" 2>/dev/null || true)"
         echo "image_size_bytes=$(docker image inspect -f '{{.Size}}' "$IMAGE" 2>/dev/null || true)"
+        echo "cargo_target_volume=$CARGO_TARGET_VOLUME"
         echo "gpu_args=${gpu_args:-}"
         echo "build_action=${build_action:-unknown}"
         echo "pull_action=${pull_action:-not_attempted}"
@@ -171,16 +173,19 @@ run_inference() {
         --label "$REPOSITORY_LABEL=$REPOSITORY_LABEL_VALUE" \
         -e MODEL="$MODEL" \
         -e INPUT="$INPUT" \
-        -v "$PWD:/workspace" \
+        -e CARGO_TARGET_DIR=/cargo-target \
+        -v "$PWD:/workspace:ro" \
+        -v "$CARGO_TARGET_VOLUME:/cargo-target" \
         -w /workspace \
         "$IMAGE" \
         rust-torch-env bash -lc '
             set -eu
-            cd rust_inference
+            cp -R /workspace/rust_inference /tmp/rust_inference
+            cd /tmp/rust_inference
             cargo build --release
-            target/release/energy-gru-inference \
-                --model "../$MODEL" \
-                --input "../$INPUT"
+            "$CARGO_TARGET_DIR/release/energy-gru-inference" \
+                --model "/workspace/$MODEL" \
+                --input "/workspace/$INPUT"
         '
     run_seconds="$(( $(date +%s) - run_start ))"
     write_metadata

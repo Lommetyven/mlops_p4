@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import yaml
 
@@ -8,6 +11,21 @@ from scripts.tune_batch_size import (
     update_runtime_config_batch_size,
     write_report,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_script_entrypoint_can_import_project_modules():
+    result = subprocess.run(
+        [sys.executable, "scripts/tune_batch_size.py", "--help"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--config" in result.stdout
 
 
 def test_build_candidate_batch_sizes_includes_powers_configured_and_maximum():

@@ -3,6 +3,7 @@ import gc
 import json
 import math
 import os
+import sys
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -11,7 +12,11 @@ import torch
 import torch.distributed as dist
 import yaml
 
-from main import (
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from main import (  # noqa: E402
     autocast_dtype,
     autocast_enabled,
     build_criterion,
@@ -26,7 +31,7 @@ from main import (
     seed_everything,
     setup_distributed_if_requested,
 )
-from train.gru_model import GruModel
+from train.gru_model import GruModel  # noqa: E402
 
 
 def build_candidate_batch_sizes(configured, minimum, maximum):

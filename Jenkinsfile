@@ -47,6 +47,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab Slurm GPU count.'),
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.'),
         choice(name: 'AI_LAB_TIME_LIMIT', choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'], description: 'AI Lab Slurm max wall time.'),
+        booleanParam(name: 'MAXIMIZE_GPU_UTIL', defaultValue: false, description: 'AI Lab only: benchmark batch sizes on the selected GPUs before full training.'),
 
         string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.'),
         booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.'),
@@ -103,6 +104,7 @@ pipeline {
             choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'],
             description: 'AI Lab Slurm max wall time.'
         )
+        booleanParam(name: 'MAXIMIZE_GPU_UTIL', defaultValue: false, description: 'AI Lab only: benchmark batch sizes on the selected GPUs before full training.')
 
         string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.')
         booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.')
@@ -164,6 +166,7 @@ pipeline {
                     env.AI_LAB_GPUS = params.AI_LAB_GPUS ?: '4'
                     env.AI_LAB_CPUS = params.AI_LAB_CPUS ?: '8'
                     env.AI_LAB_TIME_LIMIT = params.AI_LAB_TIME_LIMIT ?: '04:00:00'
+                    env.MAXIMIZE_GPU_UTIL = "${params.MAXIMIZE_GPU_UTIL == null ? false : params.MAXIMIZE_GPU_UTIL}"
 
                     env.WANDB_RUN_NAME = params.WANDB_RUN_NAME ?: ''
                     env.CARBON_TRACKING = "${params.CARBON_TRACKING == null ? true : params.CARBON_TRACKING}"
@@ -452,7 +455,7 @@ PY
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_NODES='$AI_LAB_NODES' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_NODES='$AI_LAB_NODES' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT' MAXIMIZE_GPU_UTIL='$MAXIMIZE_GPU_UTIL'"
 
                         tar -czf reports/ai_lab_code.tar.gz \
                             configs \
@@ -474,7 +477,7 @@ PY
 set -eu
 
 WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
-export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED MAXIMIZE_GPU_UTIL
 
 cd "$AI_LAB_REPO_PATH"
 tar -xzf reports/ai_lab_code.tar.gz
@@ -507,7 +510,7 @@ REMOTE_SCRIPT
 set -eu
 
 WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
-export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED MAXIMIZE_GPU_UTIL
 
 cd "$AI_LAB_REPO_PATH"
 tar -xzf reports/ai_lab_data.tar.gz
@@ -519,7 +522,7 @@ sbatch \
     --gres="gpu:${AI_LAB_GPUS}" \
     --cpus-per-task="${AI_LAB_CPUS}" \
     --time="${AI_LAB_TIME_LIMIT}" \
-    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED",TORCHRUN_NNODES="$AI_LAB_NODES",TORCHRUN_NPROC_PER_NODE="$AI_LAB_GPUS" \
+    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED",MAXIMIZE_GPU_UTIL="$MAXIMIZE_GPU_UTIL",TORCHRUN_NNODES="$AI_LAB_NODES",TORCHRUN_NPROC_PER_NODE="$AI_LAB_GPUS" \
     scripts/train_mode.sh
 tar --exclude=reports/ai_lab_results.tar.gz -czf reports/ai_lab_results.tar.gz models reports
 REMOTE_SCRIPT
@@ -655,7 +658,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

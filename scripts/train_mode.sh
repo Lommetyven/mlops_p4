@@ -48,9 +48,11 @@ fi
 PYTHON_BIN=.venv/bin/python
 TRAIN_CONFIG_PATH="${TRAIN_CONFIG_PATH:-configs/train_config.yaml}"
 TRAIN_DISTRIBUTED="${TRAIN_DISTRIBUTED:-true}"
+MAXIMIZE_GPU_UTIL="${MAXIMIZE_GPU_UTIL:-false}"
 TORCHRUN_NNODES="${TORCHRUN_NNODES:-${SLURM_JOB_NUM_NODES:-${SLURM_NNODES:-1}}}"
 MASTER_PORT="${MASTER_PORT:-29500}"
-export PYTHON_BIN TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED TORCHRUN_NNODES MASTER_PORT
+export PYTHON_BIN TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED MAXIMIZE_GPU_UTIL
+export TORCHRUN_NNODES MASTER_PORT
 
 echo "Using Python: $("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
 echo "Training config: $TRAIN_CONFIG_PATH"
@@ -81,39 +83,56 @@ resolve_processes_per_node() {
 
 CUDA_DEVICE_COUNT="$(detect_cuda_device_count)"
 
-if [ "$TRAIN_DISTRIBUTED" = "true" ] && [ "$TORCHRUN_NNODES" -gt 1 ]; then
-    NPROC_PER_NODE="$(resolve_processes_per_node)"
-    if ! command -v srun >/dev/null 2>&1; then
-        echo "srun is required for multi-node torchrun." >&2
-        exit 1
+launch_entrypoint() {
+    ENTRYPOINT="$1"
+    if [ "$ENTRYPOINT" = "main.py" ]; then
+        ENTRYPOINT_ARGS="--config $TRAIN_CONFIG_PATH"
+    else
+        ENTRYPOINT_ARGS=""
     fi
-    if ! command -v scontrol >/dev/null 2>&1; then
-        echo "scontrol is required to resolve the torchrun rendezvous host." >&2
-        exit 1
-    fi
+    export ENTRYPOINT ENTRYPOINT_ARGS
 
-    MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
-    export MASTER_ADDR MASTER_PORT NPROC_PER_NODE TORCHRUN_NNODES
-    echo "Launching multi-node torchrun: nnodes=$TORCHRUN_NNODES nproc_per_node=$NPROC_PER_NODE master=$MASTER_ADDR:$MASTER_PORT"
-    srun \
-        --nodes "$TORCHRUN_NNODES" \
-        --ntasks "$TORCHRUN_NNODES" \
-        --ntasks-per-node 1 \
-        bash -lc '"$PYTHON_BIN" -m torch.distributed.run \
-            --nnodes "$TORCHRUN_NNODES" \
+    if [ "$TRAIN_DISTRIBUTED" = "true" ] && [ "$TORCHRUN_NNODES" -gt 1 ]; then
+        NPROC_PER_NODE="$(resolve_processes_per_node)"
+        if ! command -v srun >/dev/null 2>&1; then
+            echo "srun is required for multi-node torchrun." >&2
+            exit 1
+        fi
+        if ! command -v scontrol >/dev/null 2>&1; then
+            echo "scontrol is required to resolve the torchrun rendezvous host." >&2
+            exit 1
+        fi
+
+        MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
+        export MASTER_ADDR MASTER_PORT NPROC_PER_NODE TORCHRUN_NNODES
+        echo "Launching multi-node torchrun: entrypoint=$ENTRYPOINT nnodes=$TORCHRUN_NNODES nproc_per_node=$NPROC_PER_NODE master=$MASTER_ADDR:$MASTER_PORT"
+        srun \
+            --nodes "$TORCHRUN_NNODES" \
+            --ntasks "$TORCHRUN_NNODES" \
+            --ntasks-per-node 1 \
+            bash -lc '"$PYTHON_BIN" -m torch.distributed.run \
+                --nnodes "$TORCHRUN_NNODES" \
+                --nproc-per-node "$NPROC_PER_NODE" \
+                --node-rank "$SLURM_NODEID" \
+                --rdzv-backend c10d \
+                --rdzv-endpoint "$MASTER_ADDR:$MASTER_PORT" \
+                "$ENTRYPOINT" $ENTRYPOINT_ARGS'
+    elif [ "$TRAIN_DISTRIBUTED" = "true" ] && [ "$CUDA_DEVICE_COUNT" -gt 1 ]; then
+        NPROC_PER_NODE="$(resolve_processes_per_node)"
+        echo "Launching DistributedDataParallel: entrypoint=$ENTRYPOINT processes=$NPROC_PER_NODE"
+        "$PYTHON_BIN" -m torch.distributed.run \
+            --standalone \
             --nproc-per-node "$NPROC_PER_NODE" \
-            --node-rank "$SLURM_NODEID" \
-            --rdzv-backend c10d \
-            --rdzv-endpoint "$MASTER_ADDR:$MASTER_PORT" \
-            main.py --config "$TRAIN_CONFIG_PATH"'
-elif [ "$TRAIN_DISTRIBUTED" = "true" ] && [ "$CUDA_DEVICE_COUNT" -gt 1 ]; then
-    NPROC_PER_NODE="$(resolve_processes_per_node)"
-    echo "Launching DistributedDataParallel with $NPROC_PER_NODE processes"
-    "$PYTHON_BIN" -m torch.distributed.run \
-        --standalone \
-        --nproc-per-node "$NPROC_PER_NODE" \
-        main.py --config "$TRAIN_CONFIG_PATH"
-else
-    echo "Launching single-process training"
-    "$PYTHON_BIN" main.py --config "$TRAIN_CONFIG_PATH"
+            "$ENTRYPOINT" $ENTRYPOINT_ARGS
+    else
+        echo "Launching single process: entrypoint=$ENTRYPOINT"
+        "$PYTHON_BIN" "$ENTRYPOINT" $ENTRYPOINT_ARGS
+    fi
+}
+
+if [ "$MAXIMIZE_GPU_UTIL" = "true" ]; then
+    echo "Auto-tuning per-GPU batch size on the selected AI Lab GPUs"
+    launch_entrypoint scripts/tune_batch_size.py
 fi
+
+launch_entrypoint main.py

@@ -127,6 +127,99 @@ def collect_carbontracker_summary(log_dir):
     return summary
 
 
+def collect_distributed_carbontracker_summary(log_dir):
+    log_dir = Path(log_dir)
+    if not log_dir.exists():
+        return {}
+
+    node_summaries = [
+        summary
+        for node_log_dir in sorted(log_dir.glob("node-*"))
+        if node_log_dir.is_dir()
+        for summary in [collect_carbontracker_summary(node_log_dir)]
+        if summary
+    ]
+    return aggregate_carbontracker_summaries(node_summaries)
+
+
+def aggregate_carbontracker_summaries(summaries):
+    summaries = [dict(summary) for summary in summaries if summary]
+    if not summaries:
+        return {}
+
+    sum_keys = {
+        "carbontracker/actual_energy_kwh",
+        "carbontracker/actual_co2eq_g",
+        "carbontracker/predicted_energy_kwh",
+        "carbontracker/predicted_co2eq_g",
+        "carbontracker/raw_actual_energy_kwh",
+        "carbontracker/raw_actual_co2eq_g",
+        "carbontracker/raw_predicted_energy_kwh",
+        "carbontracker/raw_predicted_co2eq_g",
+        "carbontracker/gpu_avg_power_watts",
+        "carbontracker/gpu_energy_joules",
+        "carbontracker/gpu_energy_kwh",
+        "carbontracker/gpu_co2eq_g",
+        "carbontracker/gpu_device_count",
+    }
+    max_keys = {
+        "carbontracker/early_stop",
+        "carbontracker/actual_epochs",
+        "carbontracker/actual_duration_seconds",
+        "carbontracker/predicted_epochs",
+        "carbontracker/predicted_duration_seconds",
+        "carbontracker/raw_actual_epochs",
+        "carbontracker/raw_actual_duration_seconds",
+        "carbontracker/raw_predicted_epochs",
+        "carbontracker/raw_predicted_duration_seconds",
+        "carbontracker/gpu_duration_seconds",
+        "carbontracker/gpu_consumption_correction_factor",
+    }
+    first_keys = {
+        "carbontracker/gpu_pue",
+        "carbontracker/gpu_carbon_intensity_g_per_kwh",
+    }
+    text_keys = {
+        "carbontracker/output_log",
+        "carbontracker/standard_log",
+        "carbontracker/gpu_devices",
+    }
+
+    aggregated = {"carbontracker/tracked_node_count": len(summaries)}
+    for key in sum_keys:
+        values = _numeric_summary_values(summaries, key)
+        if values:
+            aggregated[key] = sum(values)
+    for key in max_keys:
+        values = _numeric_summary_values(summaries, key)
+        if values:
+            aggregated[key] = max(values)
+    for key in first_keys:
+        values = _numeric_summary_values(summaries, key)
+        if values:
+            aggregated[key] = values[0]
+    for key in text_keys:
+        values = [str(summary[key]) for summary in summaries if summary.get(key)]
+        if values:
+            aggregated[key] = ", ".join(values)
+
+    total_power = aggregated.get("carbontracker/gpu_avg_power_watts")
+    device_count = aggregated.get("carbontracker/gpu_device_count")
+    if total_power is not None and device_count:
+        aggregated["carbontracker/gpu_avg_power_per_device_watts"] = (
+            total_power / device_count
+        )
+
+    gpu_energy_kwh = aggregated.get("carbontracker/gpu_energy_kwh")
+    gpu_co2eq_g = aggregated.get("carbontracker/gpu_co2eq_g")
+    if gpu_energy_kwh and gpu_co2eq_g is not None:
+        aggregated["carbontracker/gpu_carbon_intensity_g_per_kwh"] = (
+            gpu_co2eq_g / gpu_energy_kwh
+        )
+
+    return aggregated
+
+
 def carbontracker_log_files(log_dir):
     log_dir = Path(log_dir)
     if not log_dir.exists():
@@ -134,7 +227,7 @@ def carbontracker_log_files(log_dir):
 
     return sorted(
         path
-        for path in log_dir.glob("*carbontracker*.log")
+        for path in log_dir.rglob("*carbontracker*.log")
         if path.is_file() and path.stat().st_size > 0
     )
 
@@ -345,6 +438,15 @@ def _positive_float(value):
         return None
     number = float(value)
     return number if number > 0 else None
+
+
+def _numeric_summary_values(summaries, key):
+    return [
+        float(summary[key])
+        for summary in summaries
+        if isinstance(summary.get(key), int | float)
+        and not isinstance(summary.get(key), bool)
+    ]
 
 
 def _nanmean(values):

@@ -14,6 +14,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from monitoring import (
     carbontracker_log_files,
+    collect_distributed_carbontracker_summary,
     finish_carbon_tracker,
     start_carbon_tracker_if_enabled,
 )
@@ -458,7 +459,7 @@ def log_initial_tracking_metadata(monitor, tracking_metadata):
         monitor.update_summary(tracking_metadata)
 
 
-def log_carbon_summary(config, monitor, carbon_summary):
+def log_carbon_summary(config, monitor, carbon_summary, log_dir=None):
     if monitor is None or not carbon_summary:
         return
 
@@ -472,7 +473,11 @@ def log_carbon_summary(config, monitor, carbon_summary):
         step=int(config["training"]["epochs"]),
     )
     log_files = carbontracker_log_files(
-        config.get("carbon_tracking", {}).get("log_dir", "reports/carbontracker")
+        log_dir
+        or config.get("carbon_tracking", {}).get(
+            "log_dir",
+            "reports/carbontracker",
+        )
     )
     monitor.log_files_artifact(
         files=log_files,
@@ -1094,6 +1099,33 @@ def get_learning_rate(optimizer):
     return optimizer.param_groups[0]["lr"]
 
 
+def prepare_carbon_tracking(config, distributed_context):
+    node_count = int(
+        os.getenv("SLURM_JOB_NUM_NODES", os.getenv("TORCHRUN_NNODES", "1"))
+    )
+    is_multi_node = distributed_context["distributed"] and node_count > 1
+    is_node_leader = (
+        not distributed_context["distributed"] or distributed_context["local_rank"] == 0
+    )
+    if not is_multi_node:
+        return config, None, is_node_leader
+
+    job_id = os.getenv("SLURM_JOB_ID", "distributed")
+    node_id = os.getenv("SLURM_NODEID", str(distributed_context["rank"]))
+    base_log_dir = Path(
+        config.get("carbon_tracking", {}).get(
+            "log_dir",
+            "reports/carbontracker",
+        )
+    )
+    job_log_dir = base_log_dir / f"job-{job_id}"
+    node_config = deepcopy(config)
+    node_config.setdefault("carbon_tracking", {})["log_dir"] = str(
+        job_log_dir / f"node-{node_id}"
+    )
+    return node_config, job_log_dir, is_node_leader
+
+
 def main(config_path="configs/train_config.yaml"):
     config = load_train_config(config_path)
     model_config = config["model"]
@@ -1143,9 +1175,12 @@ def main(config_path="configs/train_config.yaml"):
     if is_main_process:
         log_initial_tracking_metadata(monitor, tracking_metadata)
         log_dataset_version_if_enabled(config, monitor)
+    carbon_tracker_config, distributed_carbon_log_dir, is_node_leader = (
+        prepare_carbon_tracking(config, distributed_context)
+    )
     carbon_tracker = (
-        start_carbon_tracker_if_enabled(config)
-        if is_main_process and run_train
+        start_carbon_tracker_if_enabled(carbon_tracker_config)
+        if is_node_leader and run_train
         else None
     )
 
@@ -1173,7 +1208,7 @@ def main(config_path="configs/train_config.yaml"):
             print(
                 "CarbonTracker: enabled "
                 f"({config['carbon_tracking']['components']}, "
-                f"log_dir={config['carbon_tracking']['log_dir']})"
+                f"log_dir={carbon_tracker_config['carbon_tracking']['log_dir']})"
             )
 
     carbon_summary = {}
@@ -1259,6 +1294,13 @@ def main(config_path="configs/train_config.yaml"):
         if distributed_context["distributed"]:
             dist.barrier()
 
+        local_carbon_summary = finish_carbon_tracker(
+            carbon_tracker,
+            carbon_tracker_config,
+        )
+        if distributed_context["distributed"]:
+            dist.barrier()
+
         if is_main_process:
             if run_test:
                 test_metrics, final_tracking_summary = log_final_tracking_outputs(
@@ -1281,8 +1323,17 @@ def main(config_path="configs/train_config.yaml"):
                     "model/best_metric": best_metric,
                 }
 
-            carbon_summary = finish_carbon_tracker(carbon_tracker, config)
-            log_carbon_summary(config, monitor, carbon_summary)
+            carbon_summary = (
+                collect_distributed_carbontracker_summary(distributed_carbon_log_dir)
+                if distributed_carbon_log_dir is not None
+                else local_carbon_summary
+            )
+            log_carbon_summary(
+                config,
+                monitor,
+                carbon_summary,
+                log_dir=distributed_carbon_log_dir,
+            )
             model_card_path = write_model_card(
                 config=config,
                 tracking_metadata=tracking_metadata,

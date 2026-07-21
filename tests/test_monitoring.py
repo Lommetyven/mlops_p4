@@ -1,6 +1,8 @@
 import pytest
 
 from monitoring.carbon_tracking import (
+    aggregate_carbontracker_summaries,
+    carbontracker_log_files,
     collect_carbontracker_summary,
     merged_carbon_tracking_config,
 )
@@ -175,3 +177,61 @@ Actual consumption for 1 epoch(s):
         raw_energy_kwh
     )
     assert not any(key.startswith("carbontracker/cpu") for key in summary)
+
+
+def test_aggregate_carbontracker_summaries_sums_nodes():
+    summaries = [
+        {
+            "carbontracker/actual_epochs": 10,
+            "carbontracker/actual_duration_seconds": 20.0,
+            "carbontracker/actual_energy_kwh": 0.02,
+            "carbontracker/actual_co2eq_g": 2.0,
+            "carbontracker/gpu_avg_power_watts": 200.0,
+            "carbontracker/gpu_energy_joules": 72000.0,
+            "carbontracker/gpu_energy_kwh": 0.02,
+            "carbontracker/gpu_co2eq_g": 2.0,
+            "carbontracker/gpu_device_count": 2,
+            "carbontracker/gpu_devices": "NVIDIA L4, NVIDIA L4",
+            "carbontracker/output_log": "node-0-output.log",
+        },
+        {
+            "carbontracker/actual_epochs": 10,
+            "carbontracker/actual_duration_seconds": 21.0,
+            "carbontracker/actual_energy_kwh": 0.03,
+            "carbontracker/actual_co2eq_g": 3.0,
+            "carbontracker/gpu_avg_power_watts": 240.0,
+            "carbontracker/gpu_energy_joules": 108000.0,
+            "carbontracker/gpu_energy_kwh": 0.03,
+            "carbontracker/gpu_co2eq_g": 3.0,
+            "carbontracker/gpu_device_count": 2,
+            "carbontracker/gpu_devices": "NVIDIA L4, NVIDIA L4",
+            "carbontracker/output_log": "node-1-output.log",
+        },
+    ]
+
+    summary = aggregate_carbontracker_summaries(summaries)
+
+    assert summary["carbontracker/tracked_node_count"] == 2
+    assert summary["carbontracker/actual_epochs"] == 10
+    assert summary["carbontracker/actual_duration_seconds"] == 21.0
+    assert summary["carbontracker/actual_energy_kwh"] == pytest.approx(0.05)
+    assert summary["carbontracker/actual_co2eq_g"] == pytest.approx(5.0)
+    assert summary["carbontracker/gpu_avg_power_watts"] == 440.0
+    assert summary["carbontracker/gpu_avg_power_per_device_watts"] == 110.0
+    assert summary["carbontracker/gpu_device_count"] == 4
+    assert summary["carbontracker/gpu_energy_joules"] == 180000.0
+    assert summary["carbontracker/gpu_energy_kwh"] == pytest.approx(0.05)
+    assert summary["carbontracker/gpu_co2eq_g"] == pytest.approx(5.0)
+    assert summary["carbontracker/gpu_carbon_intensity_g_per_kwh"] == 100.0
+    assert summary["carbontracker/output_log"] == (
+        "node-0-output.log, node-1-output.log"
+    )
+
+
+def test_carbontracker_log_files_finds_distributed_node_logs(tmp_path):
+    node_log_dir = tmp_path / "job-123" / "node-1"
+    node_log_dir.mkdir(parents=True)
+    log_path = node_log_dir / "training_carbontracker.log"
+    log_path.write_text("tracked", encoding="utf-8")
+
+    assert carbontracker_log_files(tmp_path) == [log_path]

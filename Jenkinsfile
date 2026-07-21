@@ -43,8 +43,8 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.'),
 
         choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.'),
-        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.'),
-        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab Slurm GPU count.'),
+        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Total GPUs must divide evenly across nodes.'),
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab total GPU count across all selected nodes.'),
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.'),
         choice(name: 'AI_LAB_TIME_LIMIT', choices: ['04:00:00', '00:30:00', '01:00:00', '01:30:00', '02:00:00', '02:30:00', '03:00:00', '03:30:00'], description: 'AI Lab Slurm max wall time.'),
         booleanParam(name: 'MAXIMIZE_GPU_UTIL', defaultValue: false, description: 'AI Lab only: benchmark batch sizes on the selected GPUs before full training.'),
@@ -97,8 +97,8 @@ pipeline {
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.')
 
         choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.')
-        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Use 1 unless multi-node resources are available.')
-        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab Slurm GPU count.')
+        choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Total GPUs must divide evenly across nodes.')
+        choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab total GPU count across all selected nodes.')
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.')
         choice(
             name: 'AI_LAB_TIME_LIMIT',
@@ -192,6 +192,7 @@ pipeline {
                     env.TRAIN_DISTRIBUTED = env.TRAIN_RUNNER == 'AI_LAB' ? 'true' : 'false'
                     env.AI_LAB_NODES = params.AI_LAB_NODES ?: '1'
                     env.AI_LAB_GPUS = params.AI_LAB_GPUS ?: '4'
+                    env.AI_LAB_GPUS_PER_NODE = ''
                     env.AI_LAB_CPUS = params.AI_LAB_CPUS ?: '8'
                     env.AI_LAB_TIME_LIMIT = params.AI_LAB_TIME_LIMIT ?: '04:00:00'
                     env.MAXIMIZE_GPU_UTIL = "${params.MAXIMIZE_GPU_UTIL == null ? false : params.MAXIMIZE_GPU_UTIL}"
@@ -199,6 +200,45 @@ pipeline {
                     env.WANDB_RUN_NAME = params.WANDB_RUN_NAME ?: ''
                     env.CARBON_TRACKING = "${params.CARBON_TRACKING == null ? true : params.CARBON_TRACKING}"
                     env.HARDWARE_TRACKING = "${params.HARDWARE_TRACKING == null ? true : params.HARDWARE_TRACKING}"
+                }
+            }
+        }
+
+        stage('Validate AI Lab Resources') {
+            when {
+                allOf {
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.TRAIN_RUNNER == 'AI_LAB' }
+                }
+            }
+            steps {
+                script {
+                    env.AI_LAB_GPUS_PER_NODE = sh(
+                        returnStdout: true,
+                        script: '''
+                            set -eu
+                            nodes="$AI_LAB_NODES"
+                            total_gpus="$AI_LAB_GPUS"
+
+                            case "$nodes:$total_gpus" in
+                                *[!0-9:]*|:*|*:)
+                                    echo "AI Lab nodes and GPUs must be positive integers." >&2
+                                    exit 2
+                                    ;;
+                            esac
+                            if [ "$nodes" -lt 1 ] || [ "$total_gpus" -lt 1 ]; then
+                                echo "AI Lab nodes and GPUs must be positive integers." >&2
+                                exit 2
+                            fi
+                            if [ $((total_gpus % nodes)) -ne 0 ]; then
+                                echo "AI_LAB_GPUS=$total_gpus is the total GPU count and must divide evenly across AI_LAB_NODES=$nodes." >&2
+                                exit 2
+                            fi
+
+                            echo $((total_gpus / nodes))
+                        '''
+                    ).trim()
+                    echo "AI Lab allocation: ${env.AI_LAB_NODES} node(s), ${env.AI_LAB_GPUS} total GPU(s), ${env.AI_LAB_GPUS_PER_NODE} GPU(s) per node"
                 }
             }
         }
@@ -483,7 +523,7 @@ PY
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
 
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_NODES='$AI_LAB_NODES' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT' MAXIMIZE_GPU_UTIL='$MAXIMIZE_GPU_UTIL'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' TRAIN_CONFIG_PATH='$TRAIN_CONFIG_PATH' TRAIN_DISTRIBUTED='$TRAIN_DISTRIBUTED' AI_LAB_NODES='$AI_LAB_NODES' AI_LAB_GPUS='$AI_LAB_GPUS' AI_LAB_GPUS_PER_NODE='$AI_LAB_GPUS_PER_NODE' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT' MAXIMIZE_GPU_UTIL='$MAXIMIZE_GPU_UTIL'"
 
                         tar -czf reports/ai_lab_code.tar.gz \
                             configs \
@@ -547,10 +587,10 @@ mkdir -p models reports
 sbatch \
     --wait \
     --nodes="${AI_LAB_NODES}" \
-    --gres="gpu:${AI_LAB_GPUS}" \
+    --gres="gpu:${AI_LAB_GPUS_PER_NODE}" \
     --cpus-per-task="${AI_LAB_CPUS}" \
     --time="${AI_LAB_TIME_LIMIT}" \
-    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED",MAXIMIZE_GPU_UTIL="$MAXIMIZE_GPU_UTIL",TORCHRUN_NNODES="$AI_LAB_NODES",TORCHRUN_NPROC_PER_NODE="$AI_LAB_GPUS" \
+    --export=ALL,TRAIN_CONFIG_PATH="$TRAIN_CONFIG_PATH",TRAIN_DISTRIBUTED="$TRAIN_DISTRIBUTED",MAXIMIZE_GPU_UTIL="$MAXIMIZE_GPU_UTIL",AI_LAB_GPUS_TOTAL="$AI_LAB_GPUS",AI_LAB_GPUS_PER_NODE="$AI_LAB_GPUS_PER_NODE",TORCHRUN_NNODES="$AI_LAB_NODES",TORCHRUN_NPROC_PER_NODE="$AI_LAB_GPUS_PER_NODE" \
     scripts/train_mode.sh
 tar --exclude=reports/ai_lab_results.tar.gz -czf reports/ai_lab_results.tar.gz models reports
 REMOTE_SCRIPT

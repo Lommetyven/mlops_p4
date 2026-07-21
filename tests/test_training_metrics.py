@@ -6,6 +6,7 @@ from main import (
     compute_classification_metrics,
     compute_regression_metrics,
     prefix_metrics,
+    prepare_carbon_tracking,
     render_model_card,
     scaler_enabled,
     write_model_card,
@@ -61,6 +62,32 @@ def test_precision_helpers_support_amp_modes():
     assert scaler_enabled(torch.device("cuda"), "bfloat16", amp_enabled=True) is False
     assert scaler_enabled(torch.device("cuda"), "float32", amp_enabled=True) is False
     assert scaler_enabled(torch.device("cpu"), "float16", amp_enabled=True) is False
+
+
+def test_prepare_carbon_tracking_routes_each_node_to_its_own_log_dir(
+    monkeypatch,
+):
+    monkeypatch.setenv("SLURM_JOB_NUM_NODES", "2")
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    monkeypatch.setenv("SLURM_NODEID", "1")
+    config = {"carbon_tracking": {"log_dir": "reports/carbontracker"}}
+    distributed_context = {
+        "distributed": True,
+        "rank": 2,
+        "local_rank": 0,
+    }
+
+    node_config, job_log_dir, is_node_leader = prepare_carbon_tracking(
+        config,
+        distributed_context,
+    )
+
+    assert config["carbon_tracking"]["log_dir"] == "reports/carbontracker"
+    assert job_log_dir.as_posix() == "reports/carbontracker/job-123"
+    assert node_config["carbon_tracking"]["log_dir"] == (
+        "reports/carbontracker/job-123/node-1"
+    )
+    assert is_node_leader is True
 
 
 def _model_card_inputs():

@@ -51,11 +51,15 @@ TRAIN_DISTRIBUTED="${TRAIN_DISTRIBUTED:-true}"
 MAXIMIZE_GPU_UTIL="${MAXIMIZE_GPU_UTIL:-false}"
 TORCHRUN_NNODES="${TORCHRUN_NNODES:-${SLURM_JOB_NUM_NODES:-${SLURM_NNODES:-1}}}"
 MASTER_PORT="${MASTER_PORT:-29500}"
+AI_LAB_GPUS_TOTAL="${AI_LAB_GPUS_TOTAL:-${SLURM_GPUS:-}}"
+AI_LAB_GPUS_PER_NODE="${AI_LAB_GPUS_PER_NODE:-${SLURM_GPUS_ON_NODE:-}}"
 export PYTHON_BIN TRAIN_CONFIG_PATH TRAIN_DISTRIBUTED MAXIMIZE_GPU_UTIL
-export TORCHRUN_NNODES MASTER_PORT
+export TORCHRUN_NNODES MASTER_PORT AI_LAB_GPUS_TOTAL AI_LAB_GPUS_PER_NODE
 
 echo "Using Python: $("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
 echo "Training config: $TRAIN_CONFIG_PATH"
+echo "AI Lab total GPUs: ${AI_LAB_GPUS_TOTAL:-not set}"
+echo "AI Lab GPUs per node: ${AI_LAB_GPUS_PER_NODE:-not set}"
 
 if [ -f data/dvc_archives/raw.tar.gz ]; then
     "$PYTHON_BIN" scripts/archive_paths.py unpack \

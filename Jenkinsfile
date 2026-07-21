@@ -50,7 +50,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'MAXIMIZE_GPU_UTIL', defaultValue: false, description: 'AI Lab only: benchmark batch sizes on the selected GPUs before full training.'),
 
         string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.'),
-        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.'),
+        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Track allocated GPU energy and carbon with CarbonTracker.'),
         booleanParam(name: 'HARDWARE_TRACKING', defaultValue: true, description: 'Log GPU utilization, GPU memory, GPU temperature, GPU power, CPU, RAM, runtime, and energy/carbon estimates where available.')
     ]
 }
@@ -108,7 +108,7 @@ pipeline {
         booleanParam(name: 'MAXIMIZE_GPU_UTIL', defaultValue: false, description: 'AI Lab only: benchmark batch sizes on the selected GPUs before full training.')
 
         string(name: 'WANDB_RUN_NAME', defaultValue: '', description: 'Optional W&B run name. Blank lets W&B choose.')
-        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Enable CarbonTracker.')
+        booleanParam(name: 'CARBON_TRACKING', defaultValue: true, description: 'Track allocated GPU energy and carbon with CarbonTracker.')
         booleanParam(name: 'HARDWARE_TRACKING', defaultValue: true, description: 'Log GPU utilization, GPU memory, GPU temperature, GPU power, CPU, RAM, runtime, and energy/carbon estimates where available.')
     }
 

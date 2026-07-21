@@ -1,4 +1,9 @@
-from monitoring.carbon_tracking import collect_carbontracker_summary
+import pytest
+
+from monitoring.carbon_tracking import (
+    collect_carbontracker_summary,
+    merged_carbon_tracking_config,
+)
 from monitoring.wandb_monitor import (
     WandbMonitorConfig,
     _to_float,
@@ -105,3 +110,68 @@ Actual consumption for 50 epoch(s):
     assert summary["carbontracker/actual_co2eq_g"] == 0.0143
     assert summary["carbontracker/gpu_avg_power_watts"] == 100.0
     assert summary["carbontracker/cpu_avg_power_watts"] == 50.0
+
+
+def test_carbon_tracking_defaults_to_gpu_only():
+    assert merged_carbon_tracking_config({})["components"] == "gpu"
+
+
+def test_collect_carbontracker_summary_sums_multiple_gpus(tmp_path):
+    output_log = tmp_path / "training_456_2026-07-19T171929Z_carbontracker_output.log"
+    standard_log = tmp_path / "training_456_2026-07-19T171929Z_carbontracker.log"
+    gpu_count = 4
+    per_device_power_watts = 100.0
+    duration_seconds = 2.0
+    pue = 1.58
+    carbon_intensity = 143.3
+    raw_energy_kwh = per_device_power_watts * duration_seconds / 3_600_000 * pue
+    raw_co2eq_g = raw_energy_kwh * carbon_intensity
+
+    output_log.write_text(
+        f"""
+2026-07-19 17:19:29 - CarbonTracker:
+Actual consumption for 1 epoch(s):
+    Time:   0:00:02
+    Energy: {raw_energy_kwh:.12f} kWh
+    CO2eq:  {raw_co2eq_g:.12f} g
+""",
+        encoding="utf-8",
+    )
+    standard_log.write_text(
+        "\n"
+        "2026-07-19 17:19:29 - The following components were found: "
+        "GPU with device(s) NVIDIA L4, NVIDIA L4, NVIDIA L4, NVIDIA L4.\n"
+        "2026-07-19 17:19:30 - Epoch 1:\n"
+        "2026-07-19 17:19:31 - Duration: 0:00:02.00\n"
+        "2026-07-19 17:19:31 - Average power usage (W) for gpu: 100.0\n",
+        encoding="utf-8",
+    )
+
+    summary = collect_carbontracker_summary(tmp_path)
+
+    direct_gpu_energy_kwh = (
+        gpu_count * per_device_power_watts * duration_seconds / 3_600_000
+    )
+    assert summary["carbontracker/gpu_device_count"] == gpu_count
+    assert summary["carbontracker/gpu_avg_power_per_device_watts"] == 100.0
+    assert summary["carbontracker/gpu_avg_power_watts"] == 400.0
+    assert summary["carbontracker/gpu_energy_joules"] == pytest.approx(800.0)
+    assert summary["carbontracker/gpu_energy_kwh"] == pytest.approx(
+        direct_gpu_energy_kwh
+    )
+    assert summary["carbontracker/gpu_co2eq_g"] == pytest.approx(
+        direct_gpu_energy_kwh * carbon_intensity
+    )
+    assert summary["carbontracker/actual_energy_kwh"] == pytest.approx(
+        direct_gpu_energy_kwh * pue
+    )
+    assert summary["carbontracker/actual_co2eq_g"] == pytest.approx(
+        direct_gpu_energy_kwh * pue * carbon_intensity
+    )
+    assert summary["carbontracker/gpu_consumption_correction_factor"] == (
+        pytest.approx(gpu_count)
+    )
+    assert summary["carbontracker/raw_actual_energy_kwh"] == pytest.approx(
+        raw_energy_kwh
+    )
+    assert not any(key.startswith("carbontracker/cpu") for key in summary)

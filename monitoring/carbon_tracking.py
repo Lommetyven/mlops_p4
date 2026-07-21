@@ -14,7 +14,7 @@ DEFAULT_CARBON_TRACKING_CONFIG = {
     "interpretable": True,
     "stop_and_confirm": False,
     "ignore_errors": True,
-    "components": "all",
+    "components": "gpu",
     "devices_by_pid": False,
     "verbose": 1,
     "decimal_precision": 12,
@@ -94,6 +94,7 @@ def collect_carbontracker_summary(log_dir):
         logs,
         key=lambda entry: Path(entry["output_filename"]).stat().st_mtime,
     )
+    components = latest_log.get("components", {})
     summary = {
         "carbontracker/output_log": latest_log["output_filename"],
         "carbontracker/standard_log": latest_log["standard_filename"],
@@ -110,10 +111,18 @@ def collect_carbontracker_summary(log_dir):
         latest_log.get("pred"),
         fallback_consumptions.get("predicted"),
     )
+    actual_consumption, predicted_consumption, gpu_metrics = (
+        _correct_gpu_only_consumptions(
+            actual_consumption,
+            predicted_consumption,
+            components,
+        )
+    )
 
     summary.update(_flatten_consumption("actual", actual_consumption))
     summary.update(_flatten_consumption("predicted", predicted_consumption))
-    summary.update(_flatten_component_metrics(latest_log.get("components", {})))
+    summary.update(_flatten_component_metrics(components))
+    summary.update(gpu_metrics)
 
     return summary
 
@@ -213,24 +222,129 @@ def _flatten_component_metrics(components):
     metrics = {}
     for component_name, component_metrics in components.items():
         prefix = f"carbontracker/{component_name}"
+        devices = _component_devices(component_metrics)
+        device_count = len(devices)
 
         power_usages = component_metrics.get("avg_power_usages (W)")
         if power_usages is not None:
-            metrics[f"{prefix}_avg_power_watts"] = _nanmean(power_usages)
+            average_power = _nanmean(power_usages)
+            if component_name == "gpu" and device_count:
+                metrics[f"{prefix}_avg_power_per_device_watts"] = average_power
+                average_power *= device_count
+            metrics[f"{prefix}_avg_power_watts"] = average_power
 
         energy_usages = component_metrics.get("avg_energy_usages (J)")
         if energy_usages is not None:
-            metrics[f"{prefix}_energy_joules"] = _nansum(energy_usages)
+            energy_joules = _nansum(energy_usages)
+            if component_name == "gpu" and device_count:
+                energy_joules *= _missing_device_dimension_scale(
+                    energy_usages,
+                    device_count,
+                )
+            metrics[f"{prefix}_energy_joules"] = energy_joules
 
         durations = component_metrics.get("epoch_durations (s)")
         if durations is not None:
             metrics[f"{prefix}_duration_seconds"] = _nansum(durations)
 
-        devices = component_metrics.get("devices")
         if devices:
             metrics[f"{prefix}_devices"] = ", ".join(devices)
+            metrics[f"{prefix}_device_count"] = device_count
 
     return metrics
+
+
+def _correct_gpu_only_consumptions(actual, predicted, components):
+    if set(components) != {"gpu"} or not actual:
+        return actual, predicted, {}
+
+    gpu_component = components["gpu"]
+    devices = _component_devices(gpu_component)
+    energy_usages = gpu_component.get("avg_energy_usages (J)")
+    if not devices or energy_usages is None:
+        return actual, predicted, {}
+
+    device_correction_factor = _missing_device_dimension_scale(
+        energy_usages,
+        len(devices),
+    )
+    parsed_gpu_energy_joules = _nansum(energy_usages) * device_correction_factor
+
+    try:
+        from carbontracker.constants import PUE_2023
+    except ImportError:
+        PUE_2023 = 1.0
+
+    raw_energy_kwh = _positive_float(actual.get("energy (kWh)"))
+    raw_co2eq_g = _positive_float(actual.get("co2eq (g)"))
+    if raw_energy_kwh is not None:
+        correction_factor = device_correction_factor
+        corrected_energy_kwh = raw_energy_kwh * correction_factor
+        gpu_energy_kwh = corrected_energy_kwh / float(PUE_2023)
+    else:
+        correction_factor = 1.0
+        gpu_energy_kwh = parsed_gpu_energy_joules / 3_600_000
+        corrected_energy_kwh = gpu_energy_kwh * float(PUE_2023)
+
+    carbon_intensity = (
+        raw_co2eq_g / raw_energy_kwh
+        if raw_energy_kwh is not None and raw_co2eq_g is not None
+        else None
+    )
+
+    corrected_actual = dict(actual)
+    corrected_actual["energy (kWh)"] = corrected_energy_kwh
+    if carbon_intensity is not None:
+        corrected_actual["co2eq (g)"] = corrected_energy_kwh * carbon_intensity
+
+    corrected_predicted = _scale_consumption(predicted, correction_factor)
+    metrics = {
+        "carbontracker/gpu_energy_joules": gpu_energy_kwh * 3_600_000,
+        "carbontracker/gpu_energy_kwh": gpu_energy_kwh,
+        "carbontracker/gpu_pue": float(PUE_2023),
+        "carbontracker/gpu_consumption_correction_factor": correction_factor,
+    }
+    if carbon_intensity is not None:
+        metrics["carbontracker/gpu_carbon_intensity_g_per_kwh"] = carbon_intensity
+        metrics["carbontracker/gpu_co2eq_g"] = gpu_energy_kwh * carbon_intensity
+
+    if correction_factor != 1.0:
+        metrics.update(_flatten_consumption("raw_actual", actual))
+        metrics.update(_flatten_consumption("raw_predicted", predicted))
+
+    return corrected_actual, corrected_predicted, metrics
+
+
+def _scale_consumption(consumption, factor):
+    if not consumption:
+        return consumption
+
+    scaled = dict(consumption)
+    for key in ("energy (kWh)", "co2eq (g)"):
+        if scaled.get(key) is not None:
+            scaled[key] = float(scaled[key]) * factor
+    return scaled
+
+
+def _component_devices(component_metrics):
+    return [
+        str(device).strip()
+        for device in component_metrics.get("devices", [])
+        if str(device).strip()
+    ]
+
+
+def _missing_device_dimension_scale(values, device_count):
+    array = np.asarray(values, dtype=float)
+    measured_device_count = array.shape[-1] if array.ndim >= 2 else 1
+    return device_count / max(1, measured_device_count)
+
+
+def _positive_float(value):
+    if value is None:
+        return None
+    number = float(value)
+    return number if number > 0 else None
 
 
 def _nanmean(values):

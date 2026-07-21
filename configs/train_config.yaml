@@ -82,7 +82,7 @@ carbon_tracking:
   interpretable: true
   stop_and_confirm: false
   ignore_errors: true
-  components: "all"
+  components: "gpu"
   devices_by_pid: false
   verbose: 1
   decimal_precision: 12

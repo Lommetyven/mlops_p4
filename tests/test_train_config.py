@@ -33,6 +33,7 @@ def test_train_config_yaml_has_required_sections():
     assert config["data_versioning"]["artifact_type"] == "dataset"
     assert config["carbon_tracking"]["enabled"] is True
     assert config["carbon_tracking"]["log_dir"] == "reports/carbontracker"
+    assert config["carbon_tracking"]["components"] == "gpu"
 
     training = config["training"]
     for key in (

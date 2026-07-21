@@ -116,7 +116,7 @@ DEFAULT_CONFIG = {
         "interpretable": True,
         "stop_and_confirm": False,
         "ignore_errors": True,
-        "components": "all",
+        "components": "gpu",
         "devices_by_pid": False,
         "verbose": 1,
         "decimal_precision": 12,

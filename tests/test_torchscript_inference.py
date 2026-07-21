@@ -13,7 +13,7 @@ class LastStepModel(torch.nn.Module):
         return inputs[:, -1, :1]
 
 
-def test_torchscript_inference_processes_every_sliding_window(tmp_path):
+def test_torchscript_inference_processes_every_sliding_window(tmp_path, monkeypatch):
     model_path = tmp_path / "model.pt"
     input_path = tmp_path / "input.csv"
     predictions_path = tmp_path / "predictions.txt"
@@ -35,6 +35,8 @@ def test_torchscript_inference_processes_every_sliding_window(tmp_path):
         "monitoring:\n  mode: disabled\n",
         encoding="utf-8",
     )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
 
     metrics = run_torchscript_inference(
         model_path=model_path,

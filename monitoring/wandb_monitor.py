@@ -20,6 +20,8 @@ class WandbMonitorConfig:
     project: str = "MLOps"
     entity: str | None = "tobiasr-aalborg-universitet"
     run_name: str | None = None
+    group: str | None = None
+    job_type: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
     mode: str = "online"
@@ -73,6 +75,8 @@ class WandbMonitor:
             project=self.config.project,
             entity=self.config.entity,
             name=self.config.run_name,
+            group=self.config.group,
+            job_type=self.config.job_type,
             notes=self.config.notes,
             tags=self.config.tags,
             mode=self.config.mode,

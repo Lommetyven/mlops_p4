@@ -36,6 +36,21 @@ does not provide an FP8 GRU kernel. It is not silently replaced with FP16.
 The binary uses the `tch` crate and requires libtorch/PyTorch native libraries
 available on the machine where it is built and run.
 
+## Jenkins Runners And W&B
+
+Jenkins routes inference through the selected `TRAIN_RUNNER`:
+
+- `AI_LAB` submits a separate one-GPU Slurm job and runs the TorchScript model
+  with Python/PyTorch. This is the normal route for CUDA FP16 inference.
+- `DAKI_WORKER` runs this Rust `tch` binary. FP32 can use its CPU fallback;
+  FP16 requires Docker GPU passthrough on that worker.
+
+Both paths write `reports/inference_metrics.json` and create a separate W&B
+inference run. The W&B run logs the runner, backend, device, model version,
+precision, batch size, sequence length, runtime, window count, throughput, and
+available GPU memory metrics. Prediction values remain in
+`reports/inference_predictions.txt` as a Jenkins artifact.
+
 ## DAKI Worker Docker Container
 
 The DAKI worker can run Rust inference through Docker when `cargo` is not

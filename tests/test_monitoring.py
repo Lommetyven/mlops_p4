@@ -31,6 +31,8 @@ monitoring:
   project: "test-project"
   entity: "test-team"
   run_name: "unit-test"
+  group: "report-comparison"
+  job_type: "inference"
   notes: "unit notes"
   tags:
     - "local"
@@ -46,6 +48,8 @@ monitoring:
     assert config.project == "test-project"
     assert config.entity == "test-team"
     assert config.run_name == "unit-test"
+    assert config.group == "report-comparison"
+    assert config.job_type == "inference"
     assert config.notes == "unit notes"
     assert config.tags == ["local", "gpu"]
     assert config.mode == "offline"

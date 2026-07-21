@@ -61,10 +61,15 @@ write_metadata() {
         echo "image_size_bytes=$(docker image inspect -f '{{.Size}}' "$IMAGE" 2>/dev/null || true)"
         echo "cargo_target_volume=$CARGO_TARGET_VOLUME"
         echo "gpu_args=${gpu_args:-}"
+        echo "device=${inference_device:-unknown}"
+        echo "inference_precision=$INFERENCE_PRECISION"
+        echo "inference_sequence_length=$INFERENCE_SEQUENCE_LENGTH"
+        echo "inference_batch_size=$INFERENCE_BATCH_SIZE"
         echo "build_action=${build_action:-unknown}"
         echo "pull_action=${pull_action:-not_attempted}"
         echo "push_action=${push_action:-not_attempted}"
         echo "build_seconds=${build_seconds:-0}"
+        echo "rust_build_seconds=${rust_build_seconds:-0}"
         echo "run_seconds=${run_seconds:-0}"
     } > "$METADATA_FILE"
 }
@@ -159,16 +164,37 @@ ensure_image() {
 
 run_inference() {
     gpu_args=""
+    inference_device="cpu"
     if [ "${DOCKER_USE_GPUS:-auto}" != "false" ]; then
         if docker run --rm --gpus all "$IMAGE" true >/dev/null 2>&1; then
             gpu_args="--gpus all"
+            inference_device="cuda"
         elif [ "${DOCKER_USE_GPUS:-auto}" = "true" ]; then
             echo "Docker GPU runtime was requested but is not available." >&2
             exit 1
         fi
     fi
 
-    run_start="$(date +%s)"
+    rust_build_start="$(date +%s)"
+    docker run --rm \
+        --label "$PROJECT_LABEL=$PROJECT_LABEL_VALUE" \
+        --label "$ROLE_LABEL=$ROLE_LABEL_VALUE" \
+        --label "$REPOSITORY_LABEL=$REPOSITORY_LABEL_VALUE" \
+        -e CARGO_TARGET_DIR=/cargo-target \
+        -v "$PWD:/workspace:ro" \
+        -v "$CARGO_TARGET_VOLUME:/cargo-target" \
+        -w /workspace \
+        "$IMAGE" \
+        rust-torch-env bash -lc '
+            set -eu
+            cp -R /workspace/rust_inference /tmp/rust_inference
+            cd /tmp/rust_inference
+            cargo build --release
+        '
+    rust_build_seconds="$(( $(date +%s) - rust_build_start ))"
+
+    run_start_ns="$(date +%s%N)"
+    set +e
     # shellcheck disable=SC2086
     docker run --rm $gpu_args \
         --label "$PROJECT_LABEL=$PROJECT_LABEL_VALUE" \
@@ -186,9 +212,6 @@ run_inference() {
         "$IMAGE" \
         rust-torch-env bash -lc '
             set -eu
-            cp -R /workspace/rust_inference /tmp/rust_inference
-            cd /tmp/rust_inference
-            cargo build --release
             "$CARGO_TARGET_DIR/release/energy-gru-inference" \
                 --model "/workspace/$MODEL" \
                 --input "/workspace/$INPUT" \
@@ -196,8 +219,12 @@ run_inference() {
                 --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
                 --batch-size "$INFERENCE_BATCH_SIZE"
         '
-    run_seconds="$(( $(date +%s) - run_start ))"
+    inference_status=$?
+    set -e
+    run_end_ns="$(date +%s%N)"
+    run_seconds="$(awk -v start="$run_start_ns" -v end="$run_end_ns" 'BEGIN {printf "%.6f", (end - start) / 1000000000}')"
     write_metadata
+    return "$inference_status"
 }
 
 case "${1:-run}" in
@@ -206,6 +233,8 @@ case "${1:-run}" in
         push_action="not_attempted"
         build_image
         gpu_args=""
+        inference_device="unknown"
+        rust_build_seconds=0
         run_seconds=0
         write_metadata
         ;;

@@ -19,7 +19,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.'),
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.'),
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.'),
-        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.'),
+        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run full-dataset inference after producing or restoring the TorchScript model.'),
         booleanParam(name: 'SAVE_MODEL', defaultValue: false, description: 'Save trained checkpoint and TorchScript weights as a versioned MinIO model.'),
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.'),
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.'),
@@ -37,7 +37,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.'),
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.'),
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.'),
-        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'Rust inference precision. FP16 requires CUDA; FP8 fails capability validation for the current TorchScript GRU backend.'),
+        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'TorchScript inference precision. FP16 requires CUDA; FP8 fails capability validation for the current GRU backend.'),
         string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.'),
 
         choice(name: 'DATASET_PATH', choices: datasets, description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.'),
@@ -45,7 +45,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         string(name: 'TEST_SPLIT', defaultValue: '', description: 'Optional test split, e.g. 0.1. Blank uses config.'),
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.'),
 
-        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.'),
+        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training and inference run.'),
         choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Total GPUs must divide evenly across nodes.'),
         choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab total GPU count across all selected nodes.'),
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.'),
@@ -76,7 +76,7 @@ pipeline {
         booleanParam(name: 'REFRESH_MINIO_CHOICES', defaultValue: true, description: 'Refresh dataset and model-version dropdown choices from readable MinIO artifacts. Updated choices appear on the next build.')
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.')
-        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.')
+        booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run full-dataset inference after producing or restoring the TorchScript model.')
         booleanParam(name: 'SAVE_MODEL', defaultValue: false, description: 'Save trained checkpoint and TorchScript weights as a versioned MinIO model.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.')
@@ -94,7 +94,7 @@ pipeline {
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.')
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.')
-        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'Rust inference precision. FP16 requires CUDA; FP8 fails capability validation for the current TorchScript GRU backend.')
+        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'TorchScript inference precision. FP16 requires CUDA; FP8 fails capability validation for the current GRU backend.')
         string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.')
 
         choice(name: 'DATASET_PATH', choices: [''], description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.')
@@ -102,7 +102,7 @@ pipeline {
         string(name: 'TEST_SPLIT', defaultValue: '', description: 'Optional test split, e.g. 0.1. Blank uses config.')
         string(name: 'RANDOM_SEED', defaultValue: '', description: 'Optional random seed override. Blank uses config.')
 
-        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training runs.')
+        choice(name: 'TRAIN_RUNNER', choices: ['AI_LAB', 'DAKI_WORKER'], description: 'Where training and inference run.')
         choice(name: 'AI_LAB_NODES', choices: ['1', '2'], description: 'AI Lab Slurm node count. Total GPUs must divide evenly across nodes.')
         choice(name: 'AI_LAB_GPUS', choices: ['4', '3', '2', '1'], description: 'AI Lab total GPU count across all selected nodes.')
         choice(name: 'AI_LAB_CPUS', choices: ['8', '1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14', '15'], description: 'AI Lab Slurm CPUs per task.')
@@ -708,57 +708,257 @@ PY
             }
         }
 
-        stage('Run Inference') {
+        stage('Run Inference on AI Lab') {
             when {
-                expression { return env.RUN_INFERENCE == 'true' }
+                allOf {
+                    expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.TRAIN_RUNNER == 'AI_LAB' }
+                }
             }
             steps {
-                sh '''
-                    set -eu
-                    mkdir -p reports
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'energyconsumption_ai-lab',
+                        keyFileVariable: 'AI_LAB_SSH_KEY',
+                        usernameVariable: 'AI_LAB_SSH_USER'
+                    ),
+                    string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+                        mkdir -p reports
 
-                    if [ ! -f models/gru_model_torchscript.pt ]; then
-                        echo "TorchScript model not found at models/gru_model_torchscript.pt" >&2
-                        exit 1
-                    fi
-                    if [ ! -f reports/inference_window.csv ]; then
-                        echo "Inference input not found at reports/inference_window.csv" >&2
-                        exit 1
-                    fi
-                    if [ ! -f reports/inference_sequence_length.txt ]; then
-                        echo "Inference sequence length was not prepared." >&2
-                        exit 1
-                    fi
+                        for required_path in \
+                            models/gru_model_torchscript.pt \
+                            reports/inference_window.csv \
+                            reports/inference_sequence_length.txt; do
+                            if [ ! -f "$required_path" ]; then
+                                echo "Required inference file not found: $required_path" >&2
+                                exit 1
+                            fi
+                        done
 
-                    INFERENCE_SEQUENCE_LENGTH="$(cat reports/inference_sequence_length.txt)"
-                    export INFERENCE_SEQUENCE_LENGTH INFERENCE_PRECISION INFERENCE_BATCH_SIZE
+                        WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
+                        SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' WANDB_RUN_NAME='$WANDB_RUN_NAME' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' AI_LAB_CPUS='$AI_LAB_CPUS' INFERENCE_PRECISION='$INFERENCE_PRECISION' INFERENCE_BATCH_SIZE='$INFERENCE_BATCH_SIZE'"
 
-                    if command -v cargo >/dev/null 2>&1; then
-                        (
-                            cd rust_inference
-                            cargo run --release -- \
-                                --model ../models/gru_model_torchscript.pt \
-                                --input ../reports/inference_window.csv \
-                                --precision "$INFERENCE_PRECISION" \
-                                --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
-                                --batch-size "$INFERENCE_BATCH_SIZE"
-                        ) | tee reports/rust_inference_output.txt
-                    elif command -v docker >/dev/null 2>&1; then
-                        MODEL=models/gru_model_torchscript.pt \
-                        INPUT=reports/inference_window.csv \
-                        RUST_TORCH_DOCKER_IMAGE="$RUST_TORCH_DOCKER_IMAGE" \
-                        bash scripts/rust_inference_docker.sh run \
-                            | tee reports/rust_inference_output.txt
-                    elif [ -f containers/build/rust_torch.sif ]; then
-                        MODEL="$PWD/models/gru_model_torchscript.pt" \
-                        INPUT="$PWD/reports/inference_window.csv" \
-                        bash scripts/rust_inference_container.sh run \
-                            | tee reports/rust_inference_output.txt
-                    else
-                        echo "No Rust runtime available. Install cargo, enable Docker, or build the Singularity image first." >&2
-                        exit 1
-                    fi
-                '''
+                        tar -czf reports/ai_lab_inference_payload.tar.gz \
+                            monitoring \
+                            scripts/inference_mode.sh \
+                            scripts/inference_reporting.py \
+                            scripts/run_torchscript_inference.py \
+                            models/gru_model_torchscript.pt \
+                            reports/inference_window.csv \
+                            reports/inference_sequence_length.txt \
+                            reports/runtime_train_config.yaml \
+                            reports/runtime_monitoring_config.yaml \
+                            requirements.txt
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "mkdir -p '$AI_LAB_REPO_PATH/reports'"
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" reports/ai_lab_inference_payload.tar.gz "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/"
+
+                        set +e
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'
+set -eu
+
+WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT WANDB_RUN_NAME
+
+cd "$AI_LAB_REPO_PATH"
+tar -xzf reports/ai_lab_inference_payload.tar.gz
+rm -f reports/ai_lab_inference_payload.tar.gz
+rm -f \
+    reports/inference_predictions.txt \
+    reports/inference_metrics.json \
+    reports/inference-slurm-*.out \
+    reports/inference-slurm-*.err
+
+if command -v python3.13 >/dev/null 2>&1; then
+    BASE_PYTHON=python3.13
+elif command -v python3 >/dev/null 2>&1; then
+    BASE_PYTHON=python3
+else
+    BASE_PYTHON=python
+fi
+if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pandas, torch, wandb' >/dev/null 2>&1; then
+    "$BASE_PYTHON" -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install -r requirements.txt
+fi
+
+INFERENCE_SEQUENCE_LENGTH="$(cat reports/inference_sequence_length.txt)"
+set +e
+sbatch \
+    --wait \
+    --nodes=1 \
+    --gres=gpu:1 \
+    --cpus-per-task="$AI_LAB_CPUS" \
+    --time=00:30:00 \
+    --export=ALL,AI_LAB_REPO_PATH="$AI_LAB_REPO_PATH",PYTHON_BIN=.venv/bin/python,INFERENCE_PRECISION="$INFERENCE_PRECISION",INFERENCE_BATCH_SIZE="$INFERENCE_BATCH_SIZE",INFERENCE_SEQUENCE_LENGTH="$INFERENCE_SEQUENCE_LENGTH" \
+    scripts/inference_mode.sh
+INFERENCE_STATUS=$?
+set -e
+
+tar --ignore-failed-read -czf reports/ai_lab_inference_results.tar.gz \
+    reports/inference_predictions.txt \
+    reports/inference_metrics.json \
+    reports/inference-slurm-*.out \
+    reports/inference-slurm-*.err
+exit "$INFERENCE_STATUS"
+REMOTE_SCRIPT
+                        INFERENCE_STATUS=$?
+                        set -e
+
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/ai_lab_inference_results.tar.gz" reports/
+                        tar -xzf reports/ai_lab_inference_results.tar.gz
+                        if [ -f reports/inference_metrics.json ]; then
+                            cat reports/inference_metrics.json
+                        fi
+                        if [ "$INFERENCE_STATUS" -ne 0 ]; then
+                            echo "AI Lab inference failed with exit code $INFERENCE_STATUS" >&2
+                            exit "$INFERENCE_STATUS"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Run Inference on DAKI Worker') {
+            when {
+                allOf {
+                    expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.TRAIN_RUNNER == 'DAKI_WORKER' }
+                }
+            }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+                        mkdir -p reports
+
+                        if [ ! -f models/gru_model_torchscript.pt ]; then
+                            echo "TorchScript model not found at models/gru_model_torchscript.pt" >&2
+                            exit 1
+                        fi
+                        if [ ! -f reports/inference_window.csv ]; then
+                            echo "Inference input not found at reports/inference_window.csv" >&2
+                            exit 1
+                        fi
+                        if [ ! -f reports/inference_sequence_length.txt ]; then
+                            echo "Inference sequence length was not prepared." >&2
+                            exit 1
+                        fi
+
+                        INFERENCE_SEQUENCE_LENGTH="$(cat reports/inference_sequence_length.txt)"
+                        export INFERENCE_SEQUENCE_LENGTH INFERENCE_PRECISION INFERENCE_BATCH_SIZE
+                        rm -f \
+                            reports/docker_rust_inference_metadata.txt \
+                            reports/inference_metrics.json
+                        : > reports/inference_predictions.txt
+                        : > reports/inference_runtime.log
+                        STARTED_AT="$(.venv/bin/python -c 'import time; print(time.time())')"
+
+                        set +e
+                        if command -v cargo >/dev/null 2>&1; then
+                            INFERENCE_BACKEND=rust-cargo
+                            INFERENCE_DEVICE="$(command -v nvidia-smi >/dev/null 2>&1 && echo cuda || echo cpu)"
+                            (
+                                cd rust_inference
+                                cargo build --release
+                            ) >> reports/inference_runtime.log 2>&1
+                            BUILD_STATUS=$?
+                            if [ "$BUILD_STATUS" -eq 0 ]; then
+                                (
+                                    cd rust_inference
+                                    target/release/energy-gru-inference \
+                                        --model ../models/gru_model_torchscript.pt \
+                                        --input ../reports/inference_window.csv \
+                                        --precision "$INFERENCE_PRECISION" \
+                                        --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+                                        --batch-size "$INFERENCE_BATCH_SIZE"
+                                ) > reports/inference_predictions.txt 2>> reports/inference_runtime.log
+                                INFERENCE_STATUS=$?
+                            else
+                                INFERENCE_STATUS=$BUILD_STATUS
+                            fi
+                        elif command -v docker >/dev/null 2>&1; then
+                            INFERENCE_BACKEND=rust-docker
+                            DOCKER_USE_GPUS=auto
+                            if [ "$INFERENCE_PRECISION" != "FP32" ]; then
+                                DOCKER_USE_GPUS=true
+                            fi
+                            MODEL=models/gru_model_torchscript.pt \
+                            INPUT=reports/inference_window.csv \
+                            DOCKER_USE_GPUS="$DOCKER_USE_GPUS" \
+                            RUST_TORCH_DOCKER_IMAGE="$RUST_TORCH_DOCKER_IMAGE" \
+                            bash scripts/rust_inference_docker.sh run \
+                                > reports/inference_predictions.txt \
+                                2> reports/inference_runtime.log
+                            INFERENCE_STATUS=$?
+                            INFERENCE_DEVICE="$(awk -F= '$1 == "device" {print $2}' reports/docker_rust_inference_metadata.txt 2>/dev/null | tail -n 1)"
+                            INFERENCE_DEVICE="${INFERENCE_DEVICE:-unknown}"
+                        elif [ -f containers/build/rust_torch.sif ]; then
+                            INFERENCE_BACKEND=rust-singularity
+                            INFERENCE_DEVICE=cuda
+                            MODEL="$PWD/models/gru_model_torchscript.pt" \
+                            INPUT="$PWD/reports/inference_window.csv" \
+                            bash scripts/rust_inference_container.sh run \
+                                > reports/inference_predictions.txt \
+                                2> reports/inference_runtime.log
+                            INFERENCE_STATUS=$?
+                        else
+                            INFERENCE_BACKEND=unavailable
+                            INFERENCE_DEVICE=unknown
+                            echo "No Rust runtime available. Install cargo, enable Docker, or build the Singularity image first." > reports/inference_runtime.log
+                            INFERENCE_STATUS=1
+                        fi
+                        set -e
+
+                        FINISHED_AT="$(.venv/bin/python -c 'import time; print(time.time())')"
+                        RUNTIME_SECONDS="$(.venv/bin/python -c 'import sys; print(max(0.0, float(sys.argv[2]) - float(sys.argv[1])))' "$STARTED_AT" "$FINISHED_AT")"
+                        if [ -f reports/docker_rust_inference_metadata.txt ]; then
+                            DOCKER_RUNTIME="$(awk -F= '$1 == "run_seconds" {print $2}' reports/docker_rust_inference_metadata.txt | tail -n 1)"
+                            RUNTIME_SECONDS="${DOCKER_RUNTIME:-$RUNTIME_SECONDS}"
+                        fi
+                        if [ "$INFERENCE_STATUS" -eq 0 ]; then
+                            INFERENCE_RESULT=success
+                        else
+                            INFERENCE_RESULT=failed
+                        fi
+                        INFERENCE_MODEL_VERSION="$(.venv/bin/python -c 'import sys, yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("experiment", {}).get("model_version", "unversioned"))' "$TRAIN_CONFIG_PATH")"
+
+                        set +e
+                        .venv/bin/python scripts/inference_reporting.py \
+                            --input reports/inference_window.csv \
+                            --predictions reports/inference_predictions.txt \
+                            --precision "$INFERENCE_PRECISION" \
+                            --batch-size "$INFERENCE_BATCH_SIZE" \
+                            --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+                            --runtime-seconds "$RUNTIME_SECONDS" \
+                            --status "$INFERENCE_RESULT" \
+                            --runner DAKI_WORKER \
+                            --backend "$INFERENCE_BACKEND" \
+                            --device "$INFERENCE_DEVICE" \
+                            --model-version "$INFERENCE_MODEL_VERSION" \
+                            --error-log reports/inference_runtime.log \
+                            --monitoring-config "$MONITORING_CONFIG_PATH" \
+                            --output reports/inference_metrics.json \
+                            --wandb
+                        REPORTING_STATUS=$?
+                        set -e
+
+                        cat reports/inference_runtime.log
+                        if [ "$INFERENCE_STATUS" -ne 0 ]; then
+                            exit "$INFERENCE_STATUS"
+                        fi
+                        if [ "$REPORTING_STATUS" -ne 0 ]; then
+                            exit "$REPORTING_STATUS"
+                        fi
+                    '''
+                }
             }
         }
 
@@ -811,7 +1011,7 @@ PY
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

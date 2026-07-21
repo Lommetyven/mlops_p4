@@ -4,6 +4,7 @@ from scripts.upload_readable_artifacts import (
     collect_file_metadata,
     load_minio_credentials,
     remove_stale_archive_uploads,
+    upload_readable_artifacts,
 )
 
 
@@ -18,6 +19,15 @@ class FakeFilesystem:
     def rm(self, path):
         self.existing_paths.remove(path)
         self.removed_paths.append(path)
+
+
+class FakeUploadFilesystem(FakeFilesystem):
+    def __init__(self):
+        super().__init__(set())
+        self.uploaded_paths = []
+
+    def put_file(self, local_path, remote_path):
+        self.uploaded_paths.append(remote_path)
 
 
 def test_load_minio_credentials_from_dvc_config_local(tmp_path, monkeypatch):
@@ -85,3 +95,27 @@ def test_remove_stale_archive_uploads_removes_only_readable_archives():
         filesystem.existing_paths
     )
     assert "energyconsumption/dvc/files/md5/ab/archive" in filesystem.existing_paths
+
+
+def test_upload_readable_artifacts_can_exclude_models(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data/raw").mkdir(parents=True)
+    (tmp_path / "data/processed").mkdir(parents=True)
+    (tmp_path / "models").mkdir()
+    (tmp_path / "data/raw/raw.txt").write_text("raw", encoding="utf-8")
+    (tmp_path / "data/processed/data.csv").write_text("value\n1\n", encoding="utf-8")
+    (tmp_path / "models/gru_model.pt").write_bytes(b"weights")
+    filesystem = FakeUploadFilesystem()
+    monkeypatch.setattr(
+        "scripts.upload_readable_artifacts.load_minio_credentials",
+        lambda _remote_name: ("key", "secret", "http://minio"),
+    )
+    monkeypatch.setattr(
+        "scripts.upload_readable_artifacts.build_s3_filesystem",
+        lambda *_args: filesystem,
+    )
+
+    manifest = upload_readable_artifacts(include_models=False)
+
+    assert all("/models/" not in path for path in filesystem.uploaded_paths)
+    assert all("/models/" not in upload["s3_key"] for upload in manifest["uploads"])

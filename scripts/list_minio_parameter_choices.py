@@ -72,15 +72,16 @@ def dataset_choices_from_keys(keys, prefix):
 
 
 def model_version_choices_from_keys(keys, prefix):
-    models_prefix = f"{prefix}/models/files/"
+    models_prefix = f"{prefix}/models/versions/"
     choices = []
     for key in keys:
         if not key.startswith(models_prefix):
             continue
 
         relative_path = key.removeprefix(models_prefix)
-        if relative_path:
-            choices.append(Path(relative_path).stem)
+        parts = Path(relative_path).parts
+        if len(parts) >= 2 and parts[-1] == "gru_model_torchscript.pt":
+            choices.append(parts[0])
 
     return sorted(set(choices))
 
@@ -88,9 +89,9 @@ def model_version_choices_from_keys(keys, prefix):
 def build_parameter_choices(filesystem, bucket=DEFAULT_BUCKET, prefix=DEFAULT_PREFIX):
     prefix = prefix.strip("/")
     manifest = read_manifest(filesystem, bucket, prefix)
-    keys = keys_from_manifest(manifest)
-    if not keys:
-        keys = list_keys(filesystem, bucket, prefix)
+    keys = sorted(
+        set(keys_from_manifest(manifest)) | set(list_keys(filesystem, bucket, prefix))
+    )
 
     return {
         "datasets": dataset_choices_from_keys(keys, prefix),

@@ -20,6 +20,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.'),
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.'),
         booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.'),
+        booleanParam(name: 'SAVE_MODEL', defaultValue: false, description: 'Save trained checkpoint and TorchScript weights as a versioned MinIO model.'),
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.'),
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.'),
 
@@ -27,7 +28,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.'),
         booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.'),
 
-        choice(name: 'MODEL_VERSION', choices: modelVersions, description: 'Optional W&B/model version from readable MinIO model artifacts. Blank uses configs/train_config.yaml.'),
+        choice(name: 'MODEL_VERSION', choices: modelVersions, description: 'Model version to restore for inference. Blank restores latest; training uses the config version.'),
         string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.'),
         string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.'),
         string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.'),
@@ -36,6 +37,8 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.'),
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.'),
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.'),
+        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'Rust inference precision. FP16 requires CUDA; FP8 fails capability validation for the current TorchScript GRU backend.'),
+        string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.'),
 
         choice(name: 'DATASET_PATH', choices: datasets, description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.'),
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.'),
@@ -74,6 +77,7 @@ pipeline {
         booleanParam(name: 'RUN_DVC_REPRO', defaultValue: true, description: 'Rebuild processed data and local archives with DVC.')
         booleanParam(name: 'RUN_TRAINING', defaultValue: false, description: 'Run GRU training.')
         booleanParam(name: 'RUN_INFERENCE', defaultValue: false, description: 'Run Rust inference after producing or restoring the TorchScript model.')
+        booleanParam(name: 'SAVE_MODEL', defaultValue: false, description: 'Save trained checkpoint and TorchScript weights as a versioned MinIO model.')
         booleanParam(name: 'PUSH_DVC', defaultValue: true, description: 'Push DVC cache updates to the configured MinIO remote.')
         booleanParam(name: 'UPLOAD_READABLE_ARTIFACTS', defaultValue: true, description: 'Upload readable raw, processed, and model files under readable_artifacts/.')
 
@@ -81,7 +85,7 @@ pipeline {
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.')
         booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.')
 
-        choice(name: 'MODEL_VERSION', choices: [''], description: 'Optional W&B/model version from readable MinIO model artifacts. Blank uses configs/train_config.yaml.')
+        choice(name: 'MODEL_VERSION', choices: [''], description: 'Model version to restore for inference. Blank restores latest; training uses the config version.')
         string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.')
         string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.')
         string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.')
@@ -90,6 +94,8 @@ pipeline {
         string(name: 'LEARNING_RATE', defaultValue: '', description: 'Optional learning rate override. Blank uses config.')
         string(name: 'WEIGHT_DECAY', defaultValue: '', description: 'Optional weight decay override. Blank uses config.')
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.')
+        choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'Rust inference precision. FP16 requires CUDA; FP8 fails capability validation for the current TorchScript GRU backend.')
+        string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.')
 
         choice(name: 'DATASET_PATH', choices: [''], description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
@@ -166,6 +172,7 @@ pipeline {
                     env.RUN_DVC_REPRO = "${params.RUN_DVC_REPRO == null ? true : params.RUN_DVC_REPRO}"
                     env.RUN_TRAINING = "${params.RUN_TRAINING == null ? false : params.RUN_TRAINING}"
                     env.RUN_INFERENCE = "${params.RUN_INFERENCE == null ? false : params.RUN_INFERENCE}"
+                    env.SAVE_MODEL = "${params.SAVE_MODEL == null ? false : params.SAVE_MODEL}"
                     env.PUSH_DVC = "${params.PUSH_DVC == null ? true : params.PUSH_DVC}"
                     env.UPLOAD_READABLE_ARTIFACTS = "${params.UPLOAD_READABLE_ARTIFACTS == null ? true : params.UPLOAD_READABLE_ARTIFACTS}"
 
@@ -182,6 +189,8 @@ pipeline {
                     env.LEARNING_RATE = params.LEARNING_RATE ?: ''
                     env.WEIGHT_DECAY = params.WEIGHT_DECAY ?: ''
                     env.PRECISION_MODE = params.PRECISION_MODE ?: 'float32'
+                    env.INFERENCE_PRECISION = params.INFERENCE_PRECISION ?: 'FP32'
+                    env.INFERENCE_BATCH_SIZE = params.INFERENCE_BATCH_SIZE ?: '1024'
 
                     env.DATASET_PATH = params.DATASET_PATH ?: ''
                     env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''
@@ -439,6 +448,9 @@ PY
                     if [ -f data/dvc_archives/raw.tar.gz ]; then
                         .venv/bin/python scripts/archive_paths.py unpack --archive data/dvc_archives/raw.tar.gz --output data
                     fi
+                    if [ -f data/dvc_archives/processed.tar.gz ]; then
+                        .venv/bin/python scripts/archive_paths.py unpack --archive data/dvc_archives/processed.tar.gz --output data
+                    fi
                 '''
             }
         }
@@ -474,6 +486,26 @@ PY
                     sed -n '1,180p' "$TRAIN_CONFIG_PATH"
                     echo "Effective runtime monitoring config:"
                     sed -n '1,120p' "$MONITORING_CONFIG_PATH"
+                '''
+            }
+        }
+
+        stage('Restore Saved Model') {
+            when {
+                allOf {
+                    expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.RUN_TRAINING != 'true' }
+                }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    .venv/bin/python scripts/model_store.py pull \
+                        --version "$MODEL_VERSION" \
+                        --models-dir models \
+                        --remote-name "$DVC_REMOTE" \
+                        --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                        --prefix "$READABLE_ARTIFACTS_PREFIX"
                 '''
             }
         }
@@ -613,17 +645,31 @@ REMOTE_SCRIPT
                     .venv/bin/python scripts/extract_inference_window.py \
                         --config "$TRAIN_CONFIG_PATH" \
                         --output reports/inference_window.csv
-                    echo "Prepared inference input:"
-                    sed -n '1,8p' reports/inference_window.csv
+                    .venv/bin/python - <<'PY' > reports/inference_sequence_length.txt
+import os
+from pathlib import Path
+
+import yaml
+
+config_path = Path(os.environ["TRAIN_CONFIG_PATH"])
+restored_config_path = Path("reports/restored_model_config.yaml")
+if restored_config_path.is_file() and not os.environ.get("SEQUENCE_LENGTH"):
+    config_path = restored_config_path
+with config_path.open("r", encoding="utf-8") as config_file:
+    config = yaml.safe_load(config_file) or {}
+print(int(config["training"]["sequence_length"]))
+PY
+                    echo "Prepared full inference dataset with $(($(wc -l < reports/inference_window.csv) - 1)) rows."
+                    echo "Inference sequence length: $(cat reports/inference_sequence_length.txt)"
                 '''
             }
         }
 
         stage('Update Model Archive') {
             when {
-                anyOf {
+                allOf {
                     expression { return env.RUN_TRAINING == 'true' }
-                    expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.SAVE_MODEL == 'true' }
                 }
             }
             steps {
@@ -637,6 +683,27 @@ REMOTE_SCRIPT
                             --output models/gru_model_torchscript.pt
                     fi
                     .venv/bin/python -m dvc repro archive_models
+                '''
+            }
+        }
+
+        stage('Save Model') {
+            when {
+                allOf {
+                    expression { return env.RUN_TRAINING == 'true' }
+                    expression { return env.SAVE_MODEL == 'true' }
+                }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    .venv/bin/python scripts/model_store.py save \
+                        --version "$MODEL_VERSION" \
+                        --config "$TRAIN_CONFIG_PATH" \
+                        --models-dir models \
+                        --remote-name "$DVC_REMOTE" \
+                        --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                        --prefix "$READABLE_ARTIFACTS_PREFIX"
                 '''
             }
         }
@@ -658,13 +725,23 @@ REMOTE_SCRIPT
                         echo "Inference input not found at reports/inference_window.csv" >&2
                         exit 1
                     fi
+                    if [ ! -f reports/inference_sequence_length.txt ]; then
+                        echo "Inference sequence length was not prepared." >&2
+                        exit 1
+                    fi
+
+                    INFERENCE_SEQUENCE_LENGTH="$(cat reports/inference_sequence_length.txt)"
+                    export INFERENCE_SEQUENCE_LENGTH INFERENCE_PRECISION INFERENCE_BATCH_SIZE
 
                     if command -v cargo >/dev/null 2>&1; then
                         (
                             cd rust_inference
                             cargo run --release -- \
                                 --model ../models/gru_model_torchscript.pt \
-                                --input ../reports/inference_window.csv
+                                --input ../reports/inference_window.csv \
+                                --precision "$INFERENCE_PRECISION" \
+                                --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+                                --batch-size "$INFERENCE_BATCH_SIZE"
                         ) | tee reports/rust_inference_output.txt
                     elif command -v docker >/dev/null 2>&1; then
                         MODEL=models/gru_model_torchscript.pt \
@@ -713,10 +790,18 @@ REMOTE_SCRIPT
                         exit 1
                     fi
 
-                    .venv/bin/python scripts/upload_readable_artifacts.py \
-                        --remote-name "$DVC_REMOTE" \
-                        --bucket "$READABLE_ARTIFACTS_BUCKET" \
-                        --prefix "$READABLE_ARTIFACTS_PREFIX"
+                    if [ "$RUN_TRAINING" = "true" ] && [ "$SAVE_MODEL" = "true" ]; then
+                        .venv/bin/python scripts/upload_readable_artifacts.py \
+                            --remote-name "$DVC_REMOTE" \
+                            --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                            --prefix "$READABLE_ARTIFACTS_PREFIX"
+                    else
+                        .venv/bin/python scripts/upload_readable_artifacts.py \
+                            --remote-name "$DVC_REMOTE" \
+                            --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                            --prefix "$READABLE_ARTIFACTS_PREFIX" \
+                            --exclude-models
+                    fi
                 '''
             }
         }
@@ -726,7 +811,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

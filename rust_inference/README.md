@@ -13,15 +13,25 @@ python scripts/export_torchscript.py \
 
 Training also exports `models/gru_model_torchscript.pt` automatically.
 
-Run inference with a CSV containing one sequence window: one row per time step,
-16 numeric feature columns per row, matching the training feature order.
+Run inference with a CSV containing the feature rows for the complete dataset.
+The CLI creates every overlapping sequence window, processes the windows in
+batches, and prints one prediction per window. The 16 numeric feature columns
+must match the training feature order.
 
 ```bash
 cd rust_inference
 cargo run --release -- \
   --model ../models/gru_model_torchscript.pt \
-  --input ../tmp/window.csv
+  --input ../reports/inference_window.csv \
+  --sequence-length 12 \
+  --batch-size 1024 \
+  --precision fp32
 ```
+
+`fp32` works on CPU or CUDA. `fp16` uses half-precision weights and inputs and
+requires CUDA. `fp8` is accepted as a Jenkins/CLI capability selection but
+fails before inference because the current TorchScript GRU with `tch 0.19`
+does not provide an FP8 GRU kernel. It is not silently replaced with FP16.
 
 The binary uses the `tch` crate and requires libtorch/PyTorch native libraries
 available on the machine where it is built and run.
@@ -34,6 +44,9 @@ installed directly on the worker:
 ```bash
 MODEL=models/gru_model_torchscript.pt \
 INPUT=reports/inference_window.csv \
+INFERENCE_PRECISION=FP16 \
+INFERENCE_SEQUENCE_LENGTH=12 \
+INFERENCE_BATCH_SIZE=1024 \
 bash scripts/rust_inference_docker.sh run
 ```
 
@@ -93,6 +106,9 @@ Run inference inside the container:
 ```bash
 INPUT=tmp/window.csv \
 MODEL=models/gru_model_torchscript.pt \
+INFERENCE_PRECISION=FP32 \
+INFERENCE_SEQUENCE_LENGTH=12 \
+INFERENCE_BATCH_SIZE=1024 \
 bash scripts/rust_inference_container.sh run
 ```
 

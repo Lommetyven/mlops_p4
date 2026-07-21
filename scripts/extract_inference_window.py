@@ -17,7 +17,7 @@ def extract_inference_window(config_path, output_path, rows=None):
 
     processed_path = Path(data_config["processed_path"])
     feature_columns = list(data_config["feature_columns"])
-    window_size = int(rows or training_config["sequence_length"])
+    sequence_length = int(training_config["sequence_length"])
 
     dataframe = pd.read_csv(processed_path)
     missing_columns = [
@@ -29,13 +29,19 @@ def extract_inference_window(config_path, output_path, rows=None):
             f"{', '.join(missing_columns)}"
         )
 
-    if len(dataframe) < window_size:
+    row_count = len(dataframe) if rows is None else int(rows)
+    if row_count < sequence_length:
         raise ValueError(
             "Processed dataset has only "
-            f"{len(dataframe)} rows but needs at least {window_size}."
+            f"{row_count} selected rows but needs at least {sequence_length}."
+        )
+    if row_count > len(dataframe):
+        raise ValueError(
+            f"Requested {row_count} rows but the processed dataset has "
+            f"only {len(dataframe)}."
         )
 
-    window = dataframe.iloc[:window_size, :].loc[:, feature_columns]
+    window = dataframe.iloc[:row_count, :].loc[:, feature_columns]
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +62,7 @@ def main():
         output_path=args.output,
         rows=args.rows,
     )
-    print(f"Extracted inference window to {output_path}")
+    print(f"Extracted inference dataset to {output_path}")
 
 
 if __name__ == "__main__":

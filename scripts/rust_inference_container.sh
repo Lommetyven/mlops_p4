@@ -4,6 +4,9 @@ set -eu
 IMAGE="${RUST_TORCH_IMAGE:-containers/build/rust_torch.sif}"
 MODEL="${MODEL:-models/gru_model_torchscript.pt}"
 INPUT="${INPUT:-}"
+INFERENCE_PRECISION="${INFERENCE_PRECISION:-FP32}"
+INFERENCE_SEQUENCE_LENGTH="${INFERENCE_SEQUENCE_LENGTH:-12}"
+INFERENCE_BATCH_SIZE="${INFERENCE_BATCH_SIZE:-1024}"
 MODE="${1:-build}"
 
 if [ ! -f "$IMAGE" ]; then
@@ -28,7 +31,10 @@ case "$MODE" in
         run_in_container bash -lc 'cd rust_inference && cargo build --release'
         run_in_container rust_inference/target/release/energy-gru-inference \
             --model "$MODEL" \
-            --input "$INPUT"
+            --input "$INPUT" \
+            --precision "$INFERENCE_PRECISION" \
+            --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+            --batch-size "$INFERENCE_BATCH_SIZE"
         ;;
     shell)
         run_in_container bash

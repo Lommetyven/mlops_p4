@@ -136,6 +136,7 @@ def upload_readable_artifacts(
     bucket=DEFAULT_BUCKET,
     prefix=DEFAULT_PREFIX,
     remote_name="minio",
+    include_models=True,
 ):
     access_key, secret_key, endpoint_url = load_minio_credentials(remote_name)
     filesystem = build_s3_filesystem(access_key, secret_key, endpoint_url)
@@ -151,21 +152,23 @@ def upload_readable_artifacts(
     upload_plan = [
         ("data/raw", f"{prefix}/raw/files"),
         ("data/processed", f"{prefix}/processed/files"),
-        ("models", f"{prefix}/models/files"),
     ]
+    if include_models:
+        upload_plan.append(("models", f"{prefix}/models/files"))
     for local_directory, s3_prefix in upload_plan:
         manifest["uploads"].extend(
             upload_directory(filesystem, local_directory, bucket, s3_prefix)
         )
 
-    model_card = upload_file(
-        filesystem,
-        "reports/model_card.md",
-        bucket,
-        f"{prefix}/models/model_card.md",
-    )
-    if model_card is not None:
-        manifest["uploads"].append(model_card)
+    if include_models:
+        model_card = upload_file(
+            filesystem,
+            "reports/model_card.md",
+            bucket,
+            f"{prefix}/models/model_card.md",
+        )
+        if model_card is not None:
+            manifest["uploads"].append(model_card)
 
     remove_stale_archive_uploads(filesystem, bucket, prefix)
 
@@ -178,12 +181,14 @@ def main():
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--remote-name", default="minio")
+    parser.add_argument("--exclude-models", action="store_true")
     args = parser.parse_args()
 
     upload_readable_artifacts(
         bucket=args.bucket,
         prefix=args.prefix.strip("/"),
         remote_name=args.remote_name,
+        include_models=not args.exclude_models,
     )
 
 

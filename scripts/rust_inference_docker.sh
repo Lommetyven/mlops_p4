@@ -5,6 +5,9 @@ IMAGE="${RUST_TORCH_DOCKER_IMAGE:-172.24.198.42:5000/mlops-p4/rust-inference:lat
 DOCKERFILE="${RUST_TORCH_DOCKERFILE:-containers/rust_torch.Dockerfile}"
 MODEL="${MODEL:-models/gru_model_torchscript.pt}"
 INPUT="${INPUT:-reports/inference_window.csv}"
+INFERENCE_PRECISION="${INFERENCE_PRECISION:-FP32}"
+INFERENCE_SEQUENCE_LENGTH="${INFERENCE_SEQUENCE_LENGTH:-12}"
+INFERENCE_BATCH_SIZE="${INFERENCE_BATCH_SIZE:-1024}"
 REPORT_DIR="${REPORT_DIR:-reports}"
 BUILD_LOG="${DOCKER_BUILD_LOG:-$REPORT_DIR/docker_rust_inference_build.txt}"
 METADATA_FILE="${DOCKER_METADATA_FILE:-$REPORT_DIR/docker_rust_inference_metadata.txt}"
@@ -173,6 +176,9 @@ run_inference() {
         --label "$REPOSITORY_LABEL=$REPOSITORY_LABEL_VALUE" \
         -e MODEL="$MODEL" \
         -e INPUT="$INPUT" \
+        -e INFERENCE_PRECISION="$INFERENCE_PRECISION" \
+        -e INFERENCE_SEQUENCE_LENGTH="$INFERENCE_SEQUENCE_LENGTH" \
+        -e INFERENCE_BATCH_SIZE="$INFERENCE_BATCH_SIZE" \
         -e CARGO_TARGET_DIR=/cargo-target \
         -v "$PWD:/workspace:ro" \
         -v "$CARGO_TARGET_VOLUME:/cargo-target" \
@@ -185,7 +191,10 @@ run_inference() {
             cargo build --release
             "$CARGO_TARGET_DIR/release/energy-gru-inference" \
                 --model "/workspace/$MODEL" \
-                --input "/workspace/$INPUT"
+                --input "/workspace/$INPUT" \
+                --precision "$INFERENCE_PRECISION" \
+                --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+                --batch-size "$INFERENCE_BATCH_SIZE"
         '
     run_seconds="$(( $(date +%s) - run_start ))"
     write_metadata

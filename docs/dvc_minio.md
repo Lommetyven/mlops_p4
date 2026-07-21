@@ -18,6 +18,16 @@ s3://energyconsumption/readable_artifacts
 That prefix contains named raw data, processed data, model files, tar archives,
 and a `manifest.json` with sizes and SHA256 hashes.
 
+Jenkins also stores reusable model versions under:
+
+```text
+s3://energyconsumption/readable_artifacts/models/versions/<model-version>
+```
+
+Each version contains the Python checkpoint, TorchScript weights, runtime
+training config, and model card when available. `models/latest.json` points to
+the most recently saved version.
+
 The MinIO S3 API endpoint for DVC, `s3fs`, and Jenkins is:
 
 ```text
@@ -99,6 +109,13 @@ Restore model archives:
 python scripts/archive_paths.py unpack --archive data/dvc_archives/models.tar.gz --output .
 ```
 
+Restore a reusable named model, or omit `--version` to restore `latest`:
+
+```powershell
+python scripts/model_store.py pull --version gru-1.0.0
+python scripts/model_store.py pull
+```
+
 ## After Training
 
 After `python main.py` creates or updates `models/gru_model.pt`, refresh and push the model archive:
@@ -107,3 +124,8 @@ After `python main.py` creates or updates `models/gru_model.pt`, refresh and pus
 python -m dvc repro archive_models
 python -m dvc push -r minio
 ```
+
+In Jenkins, select `SAVE_MODEL` on a training build to save the resulting model
+version. An inference-only build pulls `MODEL_VERSION`; a blank selection pulls
+the latest saved version. The Jenkins `INFERENCE_PRECISION` and
+`INFERENCE_BATCH_SIZE` parameters affect inference only.

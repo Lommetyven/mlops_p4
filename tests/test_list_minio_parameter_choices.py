@@ -29,21 +29,23 @@ def test_build_parameter_choices_reads_manifest_uploads():
         "uploads": [
             {"s3_key": "readable_artifacts/processed/files/household_power_gru.csv"},
             {"s3_key": "readable_artifacts/models/files/gru_model.pt"},
-            {"s3_key": "readable_artifacts/models/files/gru_model_torchscript.pt"},
             {"s3_key": "readable_artifacts/models/model_card.md"},
         ]
     }
     filesystem = FakeReadableFilesystem(
+        paths=[
+            "energyconsumption/readable_artifacts/models/versions/gru-1.0.0/gru_model_torchscript.pt"
+        ],
         files={
             "energyconsumption/readable_artifacts/manifest.json": json.dumps(manifest)
-        }
+        },
     )
 
     choices = build_parameter_choices(filesystem)
 
     assert choices == {
         "datasets": ["data/processed/household_power_gru.csv"],
-        "model_versions": ["gru_model", "gru_model_torchscript"],
+        "model_versions": ["gru-1.0.0"],
     }
 
 
@@ -52,7 +54,7 @@ def test_build_parameter_choices_falls_back_to_listing_prefixes():
         paths=[
             "energyconsumption/readable_artifacts/processed/files/a.csv",
             "energyconsumption/readable_artifacts/processed/files/nested/b.csv",
-            "energyconsumption/readable_artifacts/models/files/run-a.pt",
+            "energyconsumption/readable_artifacts/models/versions/run-a/gru_model_torchscript.pt",
             "energyconsumption/readable_artifacts/models/model_card.md",
         ]
     )

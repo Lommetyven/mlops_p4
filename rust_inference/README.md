@@ -6,7 +6,7 @@ The training checkpoint `models/gru_model.pt` is a Python PyTorch checkpoint and
 cannot be loaded directly from Rust. Export it first:
 
 ```bash
-python scripts/export_torchscript.py \
+python -m scripts.export_torchscript \
   --checkpoint models/gru_model.pt \
   --output models/gru_model_torchscript.pt
 ```

@@ -103,6 +103,20 @@ python scripts/archive_paths.py unpack --archive data/dvc_archives/raw.tar.gz --
 python scripts/archive_paths.py unpack --archive data/dvc_archives/processed.tar.gz --output data
 ```
 
+When a named processed dataset is selected from `readable_artifacts`, restore it
+after `dvc repro` so the selected object is not replaced by the DVC pipeline's
+default output:
+
+```powershell
+python scripts/dataset_store.py --dataset-path data/processed/household_power_gru.csv
+```
+
+The restore maps only paths below `data/processed/` to
+`readable_artifacts/processed/files/`, downloads atomically, and verifies the
+size and SHA256 checksum against `readable_artifacts/manifest.json` when the
+manifest contains that object. Jenkins performs this step automatically for a
+non-blank `DATASET_PATH` after its optional DVC reproduction stage.
+
 Restore model archives:
 
 ```powershell

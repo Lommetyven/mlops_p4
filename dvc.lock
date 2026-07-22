@@ -61,9 +61,9 @@ stages:
     deps:
     - path: models
       hash: md5
-      md5: 9c1002666630b041c4abe6746d09754d.dir
-      size: 23536163
-      nfiles: 1
+      md5: 3fac6fb145ede31a94951b0ecd5dcc64.dir
+      size: 31384382
+      nfiles: 2
     - path: scripts/archive_paths.py
       hash: md5
       md5: 793aafbcbab6461fdbf1a9ac3a27514a
@@ -71,5 +71,5 @@ stages:
     outs:
     - path: data/dvc_archives/models.tar.gz
       hash: md5
-      md5: 72eec39b855d6c5311878048990c28ee
-      size: 16351636
+      md5: 53ba12f90b3087f88d0655acfd243bbd
+      size: 23639991

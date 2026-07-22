@@ -468,6 +468,30 @@ PY
             }
         }
 
+        stage('Restore Selected Readable Dataset') {
+            when {
+                allOf {
+                    expression {
+                        return env.DATASET_PATH != null && env.DATASET_PATH.trim() != ''
+                    }
+                    anyOf {
+                        expression { return env.RUN_TRAINING == 'true' }
+                        expression { return env.RUN_INFERENCE == 'true' }
+                    }
+                }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    .venv/bin/python scripts/dataset_store.py \
+                        --dataset-path "$DATASET_PATH" \
+                        --remote-name "$DVC_REMOTE" \
+                        --bucket "$READABLE_ARTIFACTS_BUCKET" \
+                        --prefix "$READABLE_ARTIFACTS_PREFIX"
+                '''
+            }
+        }
+
         stage('Generate Runtime Config') {
             when {
                 anyOf {
@@ -677,7 +701,7 @@ PY
                     set -eu
                     export PATH="$PWD/.venv/bin:$PATH"
                     if [ ! -f models/gru_model_torchscript.pt ] && [ -f models/gru_model.pt ]; then
-                        .venv/bin/python scripts/export_torchscript.py \
+                        .venv/bin/python -m scripts.export_torchscript \
                             --config "$TRAIN_CONFIG_PATH" \
                             --checkpoint models/gru_model.pt \
                             --output models/gru_model_torchscript.pt
@@ -1011,7 +1035,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_dataset_manifest.json,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

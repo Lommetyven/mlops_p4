@@ -57,6 +57,7 @@ def run_torchscript_inference(
     model_path,
     input_path,
     predictions_path,
+    targets_path,
     metrics_path,
     precision,
     sequence_length,
@@ -75,6 +76,7 @@ def run_torchscript_inference(
     run_context = build_inference_metrics(
         input_path=input_path,
         predictions_path=predictions_path,
+        targets_path=targets_path,
         precision=precision,
         batch_size=batch_size,
         sequence_length=sequence_length,
@@ -147,6 +149,7 @@ def run_torchscript_inference(
         metrics = build_inference_metrics(
             input_path=input_path,
             predictions_path=predictions_path,
+            targets_path=targets_path,
             precision=precision,
             batch_size=batch_size,
             sequence_length=sequence_length,
@@ -165,6 +168,7 @@ def run_torchscript_inference(
         metrics = build_inference_metrics(
             input_path=input_path,
             predictions_path=predictions_path,
+            targets_path=targets_path,
             precision=precision,
             batch_size=batch_size,
             sequence_length=sequence_length,
@@ -194,6 +198,7 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--predictions", required=True)
+    parser.add_argument("--targets", required=True)
     parser.add_argument("--metrics", required=True)
     parser.add_argument("--precision", required=True)
     parser.add_argument("--sequence-length", type=int, required=True)
@@ -211,6 +216,7 @@ def main():
         model_path=args.model,
         input_path=args.input,
         predictions_path=args.predictions,
+        targets_path=args.targets,
         metrics_path=args.metrics,
         precision=args.precision,
         sequence_length=args.sequence_length,

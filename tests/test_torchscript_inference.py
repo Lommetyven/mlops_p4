@@ -17,6 +17,7 @@ def test_torchscript_inference_processes_every_sliding_window(tmp_path, monkeypa
     model_path = tmp_path / "model.pt"
     input_path = tmp_path / "input.csv"
     predictions_path = tmp_path / "predictions.txt"
+    targets_path = tmp_path / "targets.csv"
     metrics_path = tmp_path / "metrics.json"
     config_path = tmp_path / "train_config.yaml"
     monitoring_config_path = tmp_path / "monitoring_config.yaml"
@@ -27,6 +28,10 @@ def test_torchscript_inference_processes_every_sliding_window(tmp_path, monkeypa
         [[float(row * 16 + column) for column in range(16)] for row in range(4)]
     )
     dataframe.to_csv(input_path, index=False)
+    pd.DataFrame({"target": [16.0, 32.0, 48.0]}).to_csv(
+        targets_path,
+        index=False,
+    )
     config_path.write_text(
         "experiment:\n  model_version: inference-test\n",
         encoding="utf-8",
@@ -42,6 +47,7 @@ def test_torchscript_inference_processes_every_sliding_window(tmp_path, monkeypa
         model_path=model_path,
         input_path=input_path,
         predictions_path=predictions_path,
+        targets_path=targets_path,
         metrics_path=metrics_path,
         precision="FP32",
         sequence_length=2,
@@ -60,6 +66,7 @@ def test_torchscript_inference_processes_every_sliding_window(tmp_path, monkeypa
     assert metrics["inference/expected_windows"] == 3
     assert metrics["inference/status"] == "success"
     assert metrics["inference/device"] == "CPU"
+    assert metrics["inference/rmse"] == 0.0
 
 
 def test_fp16_inference_requires_cuda():

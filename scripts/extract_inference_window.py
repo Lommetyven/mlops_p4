@@ -10,14 +10,20 @@ def load_config(path):
         return yaml.safe_load(config_file) or {}
 
 
-def extract_inference_window(config_path, output_path, rows=None):
+def extract_inference_window(
+    config_path,
+    output_path,
+    rows=None,
+    targets_output_path=None,
+    sequence_length=None,
+):
     config = load_config(config_path)
     data_config = config["data"]
     training_config = config["training"]
 
     processed_path = Path(data_config["processed_path"])
     feature_columns = list(data_config["feature_columns"])
-    sequence_length = int(training_config["sequence_length"])
+    sequence_length = int(sequence_length or training_config["sequence_length"])
 
     dataframe = pd.read_csv(processed_path)
     missing_columns = [
@@ -47,6 +53,19 @@ def extract_inference_window(config_path, output_path, rows=None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     window.to_csv(output_path, index=False)
 
+    if targets_output_path is not None:
+        target_column = data_config["target_column"]
+        if target_column not in dataframe.columns:
+            raise ValueError(
+                f"Processed data is missing target column: {target_column}"
+            )
+        aligned_targets = dataframe.iloc[:row_count, :].loc[
+            sequence_length - 1 :, [target_column]
+        ]
+        targets_output_path = Path(targets_output_path)
+        targets_output_path.parent.mkdir(parents=True, exist_ok=True)
+        aligned_targets.to_csv(targets_output_path, index=False)
+
     return output_path
 
 
@@ -54,6 +73,8 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--config", default="reports/runtime_train_config.yaml")
     parser.add_argument("--output", default="reports/inference_window.csv")
+    parser.add_argument("--targets-output")
+    parser.add_argument("--sequence-length", type=int)
     parser.add_argument("--rows", type=int, default=None)
     args = parser.parse_args()
 
@@ -61,8 +82,12 @@ def main():
         config_path=args.config,
         output_path=args.output,
         rows=args.rows,
+        targets_output_path=args.targets_output,
+        sequence_length=args.sequence_length,
     )
     print(f"Extracted inference dataset to {output_path}")
+    if args.targets_output:
+        print(f"Extracted aligned inference targets to {args.targets_output}")
 
 
 if __name__ == "__main__":

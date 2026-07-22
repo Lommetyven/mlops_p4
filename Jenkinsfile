@@ -642,9 +642,6 @@ REMOTE_SCRIPT
                 sh '''
                     set -eu
                     mkdir -p reports
-                    .venv/bin/python scripts/extract_inference_window.py \
-                        --config "$TRAIN_CONFIG_PATH" \
-                        --output reports/inference_window.csv
                     .venv/bin/python - <<'PY' > reports/inference_sequence_length.txt
 import os
 from pathlib import Path
@@ -659,7 +656,13 @@ with config_path.open("r", encoding="utf-8") as config_file:
     config = yaml.safe_load(config_file) or {}
 print(int(config["training"]["sequence_length"]))
 PY
+                    .venv/bin/python scripts/extract_inference_window.py \
+                        --config "$TRAIN_CONFIG_PATH" \
+                        --output reports/inference_window.csv \
+                        --targets-output reports/inference_targets.csv \
+                        --sequence-length "$(cat reports/inference_sequence_length.txt)"
                     echo "Prepared full inference dataset with $(($(wc -l < reports/inference_window.csv) - 1)) rows."
+                    echo "Prepared $(($(wc -l < reports/inference_targets.csv) - 1)) aligned RMSE targets."
                     echo "Inference sequence length: $(cat reports/inference_sequence_length.txt)"
                 '''
             }
@@ -732,6 +735,7 @@ PY
                         for required_path in \
                             models/gru_model_torchscript.pt \
                             reports/inference_window.csv \
+                            reports/inference_targets.csv \
                             reports/inference_sequence_length.txt; do
                             if [ ! -f "$required_path" ]; then
                                 echo "Required inference file not found: $required_path" >&2
@@ -750,6 +754,7 @@ PY
                             scripts/run_torchscript_inference.py \
                             models/gru_model_torchscript.pt \
                             reports/inference_window.csv \
+                            reports/inference_targets.csv \
                             reports/inference_sequence_length.txt \
                             reports/runtime_train_config.yaml \
                             reports/runtime_monitoring_config.yaml \
@@ -847,6 +852,10 @@ REMOTE_SCRIPT
                             echo "Inference input not found at reports/inference_window.csv" >&2
                             exit 1
                         fi
+                        if [ ! -f reports/inference_targets.csv ]; then
+                            echo "Inference targets not found at reports/inference_targets.csv" >&2
+                            exit 1
+                        fi
                         if [ ! -f reports/inference_sequence_length.txt ]; then
                             echo "Inference sequence length was not prepared." >&2
                             exit 1
@@ -934,6 +943,7 @@ REMOTE_SCRIPT
                         .venv/bin/python scripts/inference_reporting.py \
                             --input reports/inference_window.csv \
                             --predictions reports/inference_predictions.txt \
+                            --targets reports/inference_targets.csv \
                             --precision "$INFERENCE_PRECISION" \
                             --batch-size "$INFERENCE_BATCH_SIZE" \
                             --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
@@ -1011,7 +1021,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_targets.csv,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

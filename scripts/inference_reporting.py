@@ -3,6 +3,7 @@ import math
 import os
 import re
 from argparse import ArgumentParser
+from csv import reader
 from pathlib import Path
 
 try:
@@ -40,6 +41,62 @@ def count_predictions(path):
     return count
 
 
+def read_targets(path):
+    target_path = Path(path)
+    if not target_path.is_file():
+        raise FileNotFoundError(f"Inference targets not found: {target_path}")
+
+    with target_path.open("r", encoding="utf-8", newline="") as target_file:
+        rows = reader(target_file)
+        next(rows, None)
+        targets = []
+        for row_number, row in enumerate(rows, start=2):
+            if not row or not row[0].strip():
+                continue
+            try:
+                targets.append(float(row[0]))
+            except ValueError as error:
+                raise ValueError(
+                    f"Invalid inference target on CSV row {row_number}: {row[0]}"
+                ) from error
+    return targets
+
+
+def read_predictions(path):
+    prediction_path = Path(path)
+    if not prediction_path.is_file():
+        return []
+
+    predictions = []
+    with prediction_path.open("r", encoding="utf-8") as prediction_file:
+        for line in prediction_file:
+            value = line.strip()
+            if not value:
+                continue
+            try:
+                predictions.append(float(value))
+            except ValueError:
+                continue
+    return predictions
+
+
+def calculate_rmse(predictions_path, targets_path):
+    predictions = read_predictions(predictions_path)
+    targets = read_targets(targets_path)
+    if not predictions:
+        raise ValueError("Cannot calculate RMSE without predictions.")
+    if len(predictions) != len(targets):
+        raise ValueError(
+            "Cannot calculate RMSE: prediction and target counts differ "
+            f"({len(predictions)} predictions, {len(targets)} targets)."
+        )
+    mean_squared_error = sum(
+        (prediction - target) ** 2
+        for prediction, target in zip(predictions, targets, strict=True)
+    ) / len(predictions)
+    return math.sqrt(mean_squared_error)
+
+
 def tail_text(path, max_characters=2000):
     log_path = Path(path) if path else None
     if log_path is None or not log_path.is_file():
@@ -50,6 +107,7 @@ def tail_text(path, max_characters=2000):
 def build_inference_metrics(
     input_path,
     predictions_path,
+    targets_path,
     precision,
     batch_size,
     sequence_length,
@@ -65,6 +123,7 @@ def build_inference_metrics(
     input_rows = count_csv_rows(input_path)
     expected_windows = max(0, input_rows - int(sequence_length) + 1)
     prediction_count = count_predictions(predictions_path)
+    target_count = len(read_targets(targets_path))
     runtime_seconds = max(0.0, float(runtime_seconds))
     throughput = prediction_count / runtime_seconds if runtime_seconds > 0 else 0.0
 
@@ -79,11 +138,23 @@ def build_inference_metrics(
         "inference/input_rows": input_rows,
         "inference/expected_windows": expected_windows,
         "inference/prediction_count": prediction_count,
+        "inference/target_count": target_count,
         "inference/batch_size": int(batch_size),
         "inference/sequence_length": int(sequence_length),
         "inference/runtime_seconds": runtime_seconds,
         "inference/throughput_windows_per_second": throughput,
     }
+    if status == "success":
+        if target_count != expected_windows:
+            raise ValueError(
+                "Cannot calculate RMSE: aligned target count does not match "
+                f"expected windows ({target_count} targets, "
+                f"{expected_windows} expected windows)."
+            )
+        metrics["inference/rmse"] = calculate_rmse(
+            predictions_path,
+            targets_path,
+        )
     if error:
         metrics["inference/error"] = str(error)
     if extra_metrics:
@@ -165,6 +236,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--predictions", required=True)
+    parser.add_argument("--targets", required=True)
     parser.add_argument("--precision", required=True)
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--sequence-length", type=int, required=True)
@@ -186,6 +258,7 @@ def main():
     metrics = build_inference_metrics(
         input_path=args.input,
         predictions_path=args.predictions,
+        targets_path=args.targets,
         precision=args.precision,
         batch_size=args.batch_size,
         sequence_length=args.sequence_length,

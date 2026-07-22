@@ -39,6 +39,7 @@ fi
     --model models/gru_model_torchscript.pt \
     --input reports/inference_window.csv \
     --predictions reports/inference_predictions.txt \
+    --targets reports/inference_targets.csv \
     --metrics reports/inference_metrics.json \
     --precision "$INFERENCE_PRECISION" \
     --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \

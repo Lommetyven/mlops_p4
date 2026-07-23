@@ -28,7 +28,7 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.'),
         booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.'),
 
-        choice(name: 'MODEL_VERSION', choices: modelVersions, description: 'Model version to restore for inference. Blank restores latest; training uses the config version.'),
+        choice(name: 'MODEL_VERSION', choices: modelVersions, description: 'Model version to restore for inference or pruning. Blank restores latest; training uses the config version.'),
         string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.'),
         string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.'),
         string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.'),
@@ -42,6 +42,10 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         booleanParam(name: 'BENCHMARK_INFERENCE_BATCHES', defaultValue: false, description: 'AI Lab inference only: benchmark latency and throughput across multiple batch sizes.'),
         string(name: 'INFERENCE_BATCH_SIZES', defaultValue: '1,8,32,128,512,1024,2048,4096', description: 'Comma-separated inference batch sizes. Must include 1 as the speedup baseline.'),
         string(name: 'INFERENCE_BENCHMARK_REPEATS', defaultValue: '3', description: 'Full-dataset timing repeats for each inference batch size.'),
+        booleanParam(name: 'RUN_PRUNING_EXPERIMENT', defaultValue: false, description: 'AI Lab only: evaluate global unstructured L1 pruning before and after fine-tuning on one GPU.'),
+        string(name: 'PRUNING_LEVELS', defaultValue: '0,10,25,50,75,90', description: 'Pruning percentages. Must include the 0% baseline; values must be below 100%.'),
+        string(name: 'PRUNING_FINETUNE_EPOCHS', defaultValue: '5', description: 'Fine-tuning epochs applied independently to every pruning level, including 0%.'),
+        string(name: 'PRUNING_LEARNING_RATE', defaultValue: '0.0001', description: 'Learning rate used for mask-preserving pruning fine-tuning.'),
 
         choice(name: 'DATASET_PATH', choices: datasets, description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.'),
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.'),
@@ -88,7 +92,7 @@ pipeline {
         booleanParam(name: 'DO_VALIDATE', defaultValue: true, description: 'Run validation during training.')
         booleanParam(name: 'DO_TEST', defaultValue: true, description: 'Run final test evaluation.')
 
-        choice(name: 'MODEL_VERSION', choices: [''], description: 'Model version to restore for inference. Blank restores latest; training uses the config version.')
+        choice(name: 'MODEL_VERSION', choices: [''], description: 'Model version to restore for inference or pruning. Blank restores latest; training uses the config version.')
         string(name: 'MODEL_HIDDEN_SIZE', defaultValue: '', description: 'Optional GRU hidden size override. Blank uses config.')
         string(name: 'MODEL_NUM_LAYERS', defaultValue: '', description: 'Optional GRU layer count override. Blank uses config.')
         string(name: 'EPOCHS', defaultValue: '', description: 'Optional epoch override. Blank uses config.')
@@ -102,6 +106,10 @@ pipeline {
         booleanParam(name: 'BENCHMARK_INFERENCE_BATCHES', defaultValue: false, description: 'AI Lab inference only: benchmark latency and throughput across multiple batch sizes.')
         string(name: 'INFERENCE_BATCH_SIZES', defaultValue: '1,8,32,128,512,1024,2048,4096', description: 'Comma-separated inference batch sizes. Must include 1 as the speedup baseline.')
         string(name: 'INFERENCE_BENCHMARK_REPEATS', defaultValue: '3', description: 'Full-dataset timing repeats for each inference batch size.')
+        booleanParam(name: 'RUN_PRUNING_EXPERIMENT', defaultValue: false, description: 'AI Lab only: evaluate global unstructured L1 pruning before and after fine-tuning on one GPU.')
+        string(name: 'PRUNING_LEVELS', defaultValue: '0,10,25,50,75,90', description: 'Pruning percentages. Must include the 0% baseline; values must be below 100%.')
+        string(name: 'PRUNING_FINETUNE_EPOCHS', defaultValue: '5', description: 'Fine-tuning epochs applied independently to every pruning level, including 0%.')
+        string(name: 'PRUNING_LEARNING_RATE', defaultValue: '0.0001', description: 'Learning rate used for mask-preserving pruning fine-tuning.')
 
         choice(name: 'DATASET_PATH', choices: [''], description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
@@ -200,6 +208,10 @@ pipeline {
                     env.BENCHMARK_INFERENCE_BATCHES = "${params.BENCHMARK_INFERENCE_BATCHES == null ? false : params.BENCHMARK_INFERENCE_BATCHES}"
                     env.INFERENCE_BATCH_SIZES = params.INFERENCE_BATCH_SIZES ?: '1,8,32,128,512,1024,2048,4096'
                     env.INFERENCE_BENCHMARK_REPEATS = params.INFERENCE_BENCHMARK_REPEATS ?: '3'
+                    env.RUN_PRUNING_EXPERIMENT = "${params.RUN_PRUNING_EXPERIMENT == null ? false : params.RUN_PRUNING_EXPERIMENT}"
+                    env.PRUNING_LEVELS = params.PRUNING_LEVELS ?: '0,10,25,50,75,90'
+                    env.PRUNING_FINETUNE_EPOCHS = params.PRUNING_FINETUNE_EPOCHS ?: '5'
+                    env.PRUNING_LEARNING_RATE = params.PRUNING_LEARNING_RATE ?: '0.0001'
 
                     env.DATASET_PATH = params.DATASET_PATH ?: ''
                     env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''
@@ -224,6 +236,9 @@ pipeline {
                     }
                     if (env.BENCHMARK_INFERENCE_BATCHES == 'true' && env.TRAIN_RUNNER != 'AI_LAB') {
                         error('Inference batch benchmarking requires TRAIN_RUNNER=AI_LAB.')
+                    }
+                    if (env.RUN_PRUNING_EXPERIMENT == 'true' && env.TRAIN_RUNNER != 'AI_LAB') {
+                        error('The pruning experiment requires TRAIN_RUNNER=AI_LAB.')
                     }
                 }
             }
@@ -315,6 +330,7 @@ pipeline {
                     expression { return env.RUN_DVC_REPRO == 'true' }
                     expression { return env.RUN_TRAINING == 'true' }
                     expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
                     expression { return env.PUSH_DVC == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
@@ -402,6 +418,7 @@ pipeline {
                 anyOf {
                     expression { return env.RUN_TRAINING == 'true' }
                     expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
             }
@@ -452,6 +469,7 @@ PY
                     expression { return env.RUN_DVC_REPRO == 'true' }
                     expression { return env.RUN_TRAINING == 'true' }
                     expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
                     expression { return env.PUSH_DVC == 'true' }
                     expression { return env.UPLOAD_READABLE_ARTIFACTS == 'true' }
                 }
@@ -493,6 +511,7 @@ PY
                     anyOf {
                         expression { return env.RUN_TRAINING == 'true' }
                         expression { return env.RUN_INFERENCE == 'true' }
+                        expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
                     }
                 }
             }
@@ -513,6 +532,7 @@ PY
                 anyOf {
                     expression { return env.RUN_TRAINING == 'true' }
                     expression { return env.RUN_INFERENCE == 'true' }
+                    expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
                 }
             }
             steps {
@@ -533,7 +553,10 @@ PY
         stage('Restore Saved Model') {
             when {
                 allOf {
-                    expression { return env.RUN_INFERENCE == 'true' }
+                    anyOf {
+                        expression { return env.RUN_INFERENCE == 'true' }
+                        expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
+                    }
                     expression { return env.RUN_TRAINING != 'true' }
                 }
             }
@@ -541,7 +564,7 @@ PY
                 sh '''
                     set -eu
                     .venv/bin/python scripts/model_store.py pull \
-                        --version "$MODEL_VERSION" \
+                        --version "${MODEL_VERSION:-}" \
                         --models-dir models \
                         --remote-name "$DVC_REMOTE" \
                         --bucket "$READABLE_ARTIFACTS_BUCKET" \
@@ -669,6 +692,143 @@ REMOTE_SCRIPT
 
                         scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/ai_lab_results.tar.gz" reports/
                         tar -xzf reports/ai_lab_results.tar.gz
+                    '''
+                }
+            }
+        }
+
+        stage('Run Pruning Experiment on AI Lab') {
+            when {
+                expression { return env.RUN_PRUNING_EXPERIMENT == 'true' }
+            }
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'energyconsumption_ai-lab',
+                        keyFileVariable: 'AI_LAB_SSH_KEY',
+                        usernameVariable: 'AI_LAB_SSH_USER'
+                    ),
+                    string(credentialsId: 'energyconsumption_key', variable: 'WANDB_API_KEY')
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+                        mkdir -p reports
+
+                        for required_path in \
+                            models/gru_model.pt \
+                            data/processed \
+                            reports/runtime_train_config.yaml \
+                            reports/runtime_monitoring_config.yaml; do
+                            if [ ! -e "$required_path" ]; then
+                                echo "Required pruning input not found: $required_path" >&2
+                                exit 1
+                            fi
+                        done
+
+                        .venv/bin/python - "$PRUNING_LEVELS" "$PRUNING_FINETUNE_EPOCHS" "$PRUNING_LEARNING_RATE" <<'PY'
+import sys
+
+from scripts.pruning_experiment import parse_pruning_levels
+
+parse_pruning_levels(sys.argv[1])
+if int(sys.argv[2]) < 1:
+    raise ValueError("PRUNING_FINETUNE_EPOCHS must be at least 1.")
+if float(sys.argv[3]) <= 0:
+    raise ValueError("PRUNING_LEARNING_RATE must be greater than 0.")
+PY
+
+                        WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
+                        WANDB_RUN_NAME_B64="$(printf '%s' "${WANDB_RUN_NAME:-}" | base64 | tr -d '\n')"
+                        PRUNING_LEVELS_B64="$(printf '%s' "$PRUNING_LEVELS" | base64 | tr -d '\n')"
+                        SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_RUN_NAME_B64='$WANDB_RUN_NAME_B64' PRUNING_LEVELS_B64='$PRUNING_LEVELS_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' AI_LAB_CPUS='$AI_LAB_CPUS' AI_LAB_TIME_LIMIT='$AI_LAB_TIME_LIMIT' PRUNING_FINETUNE_EPOCHS='$PRUNING_FINETUNE_EPOCHS' PRUNING_LEARNING_RATE='$PRUNING_LEARNING_RATE'"
+
+                        tar -czf reports/ai_lab_pruning_payload.tar.gz \
+                            data/processed \
+                            monitoring \
+                            scripts/pruning_experiment.py \
+                            scripts/pruning_mode.sh \
+                            train \
+                            models/gru_model.pt \
+                            reports/runtime_train_config.yaml \
+                            reports/runtime_monitoring_config.yaml \
+                            main.py \
+                            requirements.txt
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "mkdir -p '$AI_LAB_REPO_PATH/reports'"
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" reports/ai_lab_pruning_payload.tar.gz "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/"
+
+                        set +e
+                        ssh $SSH_OPTS -l "$AI_LAB_SSH_USER" "$AI_LAB_HOST" "$REMOTE_ENV bash -s" <<'REMOTE_SCRIPT'
+set -eu
+
+WANDB_API_KEY="$(printf '%s' "$WANDB_API_KEY_B64" | base64 -d)"
+WANDB_RUN_NAME="$(printf '%s' "$WANDB_RUN_NAME_B64" | base64 -d)"
+PRUNING_LEVELS="$(printf '%s' "$PRUNING_LEVELS_B64" | base64 -d)"
+export WANDB_API_KEY WANDB_ENTITY WANDB_PROJECT WANDB_RUN_NAME
+
+cd "$AI_LAB_REPO_PATH"
+tar -xzf reports/ai_lab_pruning_payload.tar.gz
+rm -f reports/ai_lab_pruning_payload.tar.gz
+rm -f \
+    reports/pruning_experiment.json \
+    reports/pruning_experiment.csv \
+    reports/pruning_experiment.md \
+    reports/pruning_metrics.png \
+    reports/pruning-slurm-*.out \
+    reports/pruning-slurm-*.err
+
+if command -v python3.13 >/dev/null 2>&1; then
+    BASE_PYTHON=python3.13
+elif command -v python3 >/dev/null 2>&1; then
+    BASE_PYTHON=python3
+else
+    BASE_PYTHON=python
+fi
+if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import matplotlib, torch, wandb' >/dev/null 2>&1; then
+    "$BASE_PYTHON" -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install -r requirements.txt
+fi
+if ! command -v sbatch >/dev/null 2>&1; then
+    echo "sbatch is not available on $HOSTNAME; Jenkins must SSH to an AAU AI Lab login node." >&2
+    exit 1
+fi
+
+PRUNING_LEVELS_SLURM="$(printf '%s' "$PRUNING_LEVELS" | tr ',; ' ':::')"
+set +e
+sbatch \
+    --wait \
+    --nodes=1 \
+    --gres=gpu:1 \
+    --cpus-per-task="$AI_LAB_CPUS" \
+    --time="$AI_LAB_TIME_LIMIT" \
+    --export=ALL,AI_LAB_REPO_PATH="$AI_LAB_REPO_PATH",PYTHON_BIN=.venv/bin/python,PRUNING_LEVELS="$PRUNING_LEVELS_SLURM",PRUNING_FINETUNE_EPOCHS="$PRUNING_FINETUNE_EPOCHS",PRUNING_LEARNING_RATE="$PRUNING_LEARNING_RATE" \
+    scripts/pruning_mode.sh
+PRUNING_STATUS=$?
+set -e
+
+tar --ignore-failed-read -czf reports/ai_lab_pruning_results.tar.gz \
+    reports/pruning_experiment.json \
+    reports/pruning_experiment.csv \
+    reports/pruning_experiment.md \
+    reports/pruning_metrics.png \
+    reports/pruning-slurm-*.out \
+    reports/pruning-slurm-*.err
+exit "$PRUNING_STATUS"
+REMOTE_SCRIPT
+                        PRUNING_STATUS=$?
+                        set -e
+
+                        scp $SSH_OPTS -o User="$AI_LAB_SSH_USER" "$AI_LAB_HOST:$AI_LAB_REPO_PATH/reports/ai_lab_pruning_results.tar.gz" reports/
+                        tar -xzf reports/ai_lab_pruning_results.tar.gz
+                        if [ -f reports/pruning_experiment.md ]; then
+                            cat reports/pruning_experiment.md
+                        fi
+                        if [ "$PRUNING_STATUS" -ne 0 ]; then
+                            echo "AI Lab pruning experiment failed with exit code $PRUNING_STATUS" >&2
+                            exit "$PRUNING_STATUS"
+                        fi
                     '''
                 }
             }
@@ -1074,7 +1234,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/restored_dataset_manifest.json,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_targets.csv,reports/inference_metrics.json,reports/inference_batch_benchmark.*,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_dataset_manifest.json,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_targets.csv,reports/inference_metrics.json,reports/inference_batch_benchmark.*,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/pruning_experiment.*,reports/pruning_metrics.png,reports/pruning-slurm-*.out,reports/pruning-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

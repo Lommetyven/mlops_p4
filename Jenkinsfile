@@ -39,6 +39,9 @@ def jobParameterDefinitions(datasetChoices = [''], modelVersionChoices = ['']) {
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.'),
         choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'TorchScript inference precision. FP16 requires CUDA; FP8 fails capability validation for the current GRU backend.'),
         string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.'),
+        booleanParam(name: 'BENCHMARK_INFERENCE_BATCHES', defaultValue: false, description: 'AI Lab inference only: benchmark latency and throughput across multiple batch sizes.'),
+        string(name: 'INFERENCE_BATCH_SIZES', defaultValue: '1,8,32,128,512,1024,2048,4096', description: 'Comma-separated inference batch sizes. Must include 1 as the speedup baseline.'),
+        string(name: 'INFERENCE_BENCHMARK_REPEATS', defaultValue: '3', description: 'Full-dataset timing repeats for each inference batch size.'),
 
         choice(name: 'DATASET_PATH', choices: datasets, description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.'),
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.'),
@@ -96,6 +99,9 @@ pipeline {
         choice(name: 'PRECISION_MODE', choices: ['float32', 'amp_float16', 'amp_bfloat16'], description: 'Training precision mode.')
         choice(name: 'INFERENCE_PRECISION', choices: ['FP32', 'FP16', 'FP8'], description: 'TorchScript inference precision. FP16 requires CUDA; FP8 fails capability validation for the current GRU backend.')
         string(name: 'INFERENCE_BATCH_SIZE', defaultValue: '1024', description: 'Sliding windows processed per inference batch.')
+        booleanParam(name: 'BENCHMARK_INFERENCE_BATCHES', defaultValue: false, description: 'AI Lab inference only: benchmark latency and throughput across multiple batch sizes.')
+        string(name: 'INFERENCE_BATCH_SIZES', defaultValue: '1,8,32,128,512,1024,2048,4096', description: 'Comma-separated inference batch sizes. Must include 1 as the speedup baseline.')
+        string(name: 'INFERENCE_BENCHMARK_REPEATS', defaultValue: '3', description: 'Full-dataset timing repeats for each inference batch size.')
 
         choice(name: 'DATASET_PATH', choices: [''], description: 'Optional processed dataset from readable MinIO artifacts. Blank uses config.')
         string(name: 'VALIDATION_SPLIT', defaultValue: '', description: 'Optional validation split, e.g. 0.2. Blank uses config.')
@@ -191,6 +197,9 @@ pipeline {
                     env.PRECISION_MODE = params.PRECISION_MODE ?: 'float32'
                     env.INFERENCE_PRECISION = params.INFERENCE_PRECISION ?: 'FP32'
                     env.INFERENCE_BATCH_SIZE = params.INFERENCE_BATCH_SIZE ?: '1024'
+                    env.BENCHMARK_INFERENCE_BATCHES = "${params.BENCHMARK_INFERENCE_BATCHES == null ? false : params.BENCHMARK_INFERENCE_BATCHES}"
+                    env.INFERENCE_BATCH_SIZES = params.INFERENCE_BATCH_SIZES ?: '1,8,32,128,512,1024,2048,4096'
+                    env.INFERENCE_BENCHMARK_REPEATS = params.INFERENCE_BENCHMARK_REPEATS ?: '3'
 
                     env.DATASET_PATH = params.DATASET_PATH ?: ''
                     env.VALIDATION_SPLIT = params.VALIDATION_SPLIT ?: ''
@@ -209,6 +218,13 @@ pipeline {
                     env.WANDB_RUN_NAME = params.WANDB_RUN_NAME ?: ''
                     env.CARBON_TRACKING = "${params.CARBON_TRACKING == null ? true : params.CARBON_TRACKING}"
                     env.HARDWARE_TRACKING = "${params.HARDWARE_TRACKING == null ? true : params.HARDWARE_TRACKING}"
+
+                    if (env.BENCHMARK_INFERENCE_BATCHES == 'true' && env.RUN_INFERENCE != 'true') {
+                        error('BENCHMARK_INFERENCE_BATCHES requires RUN_INFERENCE.')
+                    }
+                    if (env.BENCHMARK_INFERENCE_BATCHES == 'true' && env.TRAIN_RUNNER != 'AI_LAB') {
+                        error('Inference batch benchmarking requires TRAIN_RUNNER=AI_LAB.')
+                    }
                 }
             }
         }
@@ -769,11 +785,12 @@ PY
 
                         WANDB_API_KEY_B64="$(printf '%s' "$WANDB_API_KEY" | base64 | tr -d '\n')"
                         SSH_OPTS="-i $AI_LAB_SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' WANDB_RUN_NAME='$WANDB_RUN_NAME' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' AI_LAB_CPUS='$AI_LAB_CPUS' INFERENCE_PRECISION='$INFERENCE_PRECISION' INFERENCE_BATCH_SIZE='$INFERENCE_BATCH_SIZE'"
+                        REMOTE_ENV="WANDB_API_KEY_B64='$WANDB_API_KEY_B64' WANDB_ENTITY='$WANDB_ENTITY' WANDB_PROJECT='$WANDB_PROJECT' WANDB_RUN_NAME='$WANDB_RUN_NAME' AI_LAB_REPO_PATH='$AI_LAB_REPO_PATH' AI_LAB_CPUS='$AI_LAB_CPUS' INFERENCE_PRECISION='$INFERENCE_PRECISION' INFERENCE_BATCH_SIZE='$INFERENCE_BATCH_SIZE' BENCHMARK_INFERENCE_BATCHES='$BENCHMARK_INFERENCE_BATCHES' INFERENCE_BATCH_SIZES='$INFERENCE_BATCH_SIZES' INFERENCE_BENCHMARK_REPEATS='$INFERENCE_BENCHMARK_REPEATS'"
 
                         tar -czf reports/ai_lab_inference_payload.tar.gz \
                             monitoring \
                             scripts/inference_mode.sh \
+                            scripts/benchmark_inference_batches.py \
                             scripts/inference_reporting.py \
                             scripts/run_torchscript_inference.py \
                             models/gru_model_torchscript.pt \
@@ -799,6 +816,9 @@ rm -f reports/ai_lab_inference_payload.tar.gz
 rm -f \
     reports/inference_predictions.txt \
     reports/inference_metrics.json \
+    reports/inference_batch_benchmark.json \
+    reports/inference_batch_benchmark.csv \
+    reports/inference_batch_benchmark.md \
     reports/inference-slurm-*.out \
     reports/inference-slurm-*.err
 
@@ -816,6 +836,7 @@ if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pandas, torch, wan
 fi
 
 INFERENCE_SEQUENCE_LENGTH="$(cat reports/inference_sequence_length.txt)"
+INFERENCE_BATCH_SIZES_SLURM="$(printf '%s' "$INFERENCE_BATCH_SIZES" | tr ',; ' ':::')"
 set +e
 sbatch \
     --wait \
@@ -823,7 +844,7 @@ sbatch \
     --gres=gpu:1 \
     --cpus-per-task="$AI_LAB_CPUS" \
     --time=00:30:00 \
-    --export=ALL,AI_LAB_REPO_PATH="$AI_LAB_REPO_PATH",PYTHON_BIN=.venv/bin/python,INFERENCE_PRECISION="$INFERENCE_PRECISION",INFERENCE_BATCH_SIZE="$INFERENCE_BATCH_SIZE",INFERENCE_SEQUENCE_LENGTH="$INFERENCE_SEQUENCE_LENGTH" \
+    --export=ALL,AI_LAB_REPO_PATH="$AI_LAB_REPO_PATH",PYTHON_BIN=.venv/bin/python,INFERENCE_PRECISION="$INFERENCE_PRECISION",INFERENCE_BATCH_SIZE="$INFERENCE_BATCH_SIZE",INFERENCE_SEQUENCE_LENGTH="$INFERENCE_SEQUENCE_LENGTH",BENCHMARK_INFERENCE_BATCHES="$BENCHMARK_INFERENCE_BATCHES",INFERENCE_BATCH_SIZES="$INFERENCE_BATCH_SIZES_SLURM",INFERENCE_BENCHMARK_REPEATS="$INFERENCE_BENCHMARK_REPEATS" \
     scripts/inference_mode.sh
 INFERENCE_STATUS=$?
 set -e
@@ -831,6 +852,9 @@ set -e
 tar --ignore-failed-read -czf reports/ai_lab_inference_results.tar.gz \
     reports/inference_predictions.txt \
     reports/inference_metrics.json \
+    reports/inference_batch_benchmark.json \
+    reports/inference_batch_benchmark.csv \
+    reports/inference_batch_benchmark.md \
     reports/inference-slurm-*.out \
     reports/inference-slurm-*.err
 exit "$INFERENCE_STATUS"
@@ -842,6 +866,9 @@ REMOTE_SCRIPT
                         tar -xzf reports/ai_lab_inference_results.tar.gz
                         if [ -f reports/inference_metrics.json ]; then
                             cat reports/inference_metrics.json
+                        fi
+                        if [ -f reports/inference_batch_benchmark.md ]; then
+                            cat reports/inference_batch_benchmark.md
                         fi
                         if [ "$INFERENCE_STATUS" -ne 0 ]; then
                             echo "AI Lab inference failed with exit code $INFERENCE_STATUS" >&2
@@ -1045,7 +1072,7 @@ REMOTE_SCRIPT
         always {
             junit allowEmptyResults: true, testResults: 'reports/pytest.xml'
             archiveArtifacts(
-                artifacts: 'reports/runtime_*.yaml,reports/restored_dataset_manifest.json,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_targets.csv,reports/inference_metrics.json,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
+                artifacts: 'reports/runtime_*.yaml,reports/restored_dataset_manifest.json,reports/restored_model_*,reports/saved_model_manifest.json,reports/latest_model.json,reports/inference_sequence_length.txt,reports/inference_predictions.txt,reports/inference_targets.csv,reports/inference_metrics.json,reports/inference_batch_benchmark.*,reports/inference_runtime.log,reports/inference-slurm-*.out,reports/inference-slurm-*.err,reports/batch_size_tuning.json,reports/model_card.md,reports/minio_parameter_choices.json,reports/minio_*_choices.txt,reports/inference_window.csv,reports/rust_inference_output.txt,reports/docker_rust_inference_*.txt,dvc.lock,data/dvc_archives/*.tar.gz,data/dvc_archives/readable_artifacts_manifest.json,models/*.pt,models/*torchscript*.pt,reports/slurm-*.out,reports/slurm-*.err',
                 allowEmptyArchive: true,
                 fingerprint: true
             )

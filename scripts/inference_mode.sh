@@ -16,6 +16,9 @@ PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
 INFERENCE_SEQUENCE_LENGTH="${INFERENCE_SEQUENCE_LENGTH:-$(cat reports/inference_sequence_length.txt)}"
 INFERENCE_PRECISION="${INFERENCE_PRECISION:-FP32}"
 INFERENCE_BATCH_SIZE="${INFERENCE_BATCH_SIZE:-1024}"
+BENCHMARK_INFERENCE_BATCHES="${BENCHMARK_INFERENCE_BATCHES:-false}"
+INFERENCE_BATCH_SIZES="${INFERENCE_BATCH_SIZES:-1,8,32,128,512,1024,2048,4096}"
+INFERENCE_BENCHMARK_REPEATS="${INFERENCE_BENCHMARK_REPEATS:-3}"
 
 echo "Running inference on host: $(hostname)"
 echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-not set}"
@@ -48,3 +51,18 @@ fi
     --monitoring-config reports/runtime_monitoring_config.yaml \
     --runner AI_LAB \
     $WANDB_ARGS
+
+if [ "$BENCHMARK_INFERENCE_BATCHES" = "true" ]; then
+    echo "Benchmarking inference batch sizes: $INFERENCE_BATCH_SIZES"
+    # shellcheck disable=SC2086
+    "$PYTHON_BIN" scripts/benchmark_inference_batches.py \
+        --model models/gru_model_torchscript.pt \
+        --input reports/inference_window.csv \
+        --precision "$INFERENCE_PRECISION" \
+        --sequence-length "$INFERENCE_SEQUENCE_LENGTH" \
+        --batch-sizes "$INFERENCE_BATCH_SIZES" \
+        --repeats "$INFERENCE_BENCHMARK_REPEATS" \
+        --config reports/runtime_train_config.yaml \
+        --monitoring-config reports/runtime_monitoring_config.yaml \
+        $WANDB_ARGS
+fi

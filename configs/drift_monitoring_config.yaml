@@ -1,0 +1,46 @@
+drift_monitoring:
+  evidently_project_name: "household-power-gru-monitoring"
+
+  # The same deterministic reference/current samples are used for every window.
+  # This isolates the effect of the artificial shift from sampling variation.
+  reference_sample_count: 3000
+  current_sample_count: 3000
+  inference_batch_size: 512
+
+  # The monitoring slides mention the two-sample Kolmogorov-Smirnov test.
+  # For KS, a p-value at or below 0.05 is considered evidence of drift.
+  drift_method: "ks"
+  drift_threshold: 0.05
+
+  # Raise dataset drift when at least 25% (4 of 16) model features drift.
+  drift_share_threshold: 0.25
+
+  # Raise the performance mitigation action when RMSE is more than 5% above
+  # the first normal monitoring window.
+  performance_rmse_relative_threshold: 0.05
+
+  # These physically related power measurements are shifted together.
+  shifted_features:
+    - "Global_active_power"
+    - "Global_reactive_power"
+    - "Voltage"
+    - "Global_intensity"
+
+  # shift_std is an additive mean shift expressed in reference standard
+  # deviations and is applied to every time step in each GRU input sequence.
+  windows:
+    - name: "normal_baseline"
+      label: "Normal baseline"
+      shift_std: 0.0
+    - name: "normal_control"
+      label: "Normal control"
+      shift_std: 0.0
+    - name: "mild_drift"
+      label: "Mild drift"
+      shift_std: 0.5
+    - name: "strong_drift"
+      label: "Strong drift"
+      shift_std: 4.0
+    - name: "recovery"
+      label: "Recovery"
+      shift_std: 0.0

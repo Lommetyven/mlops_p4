@@ -27,3 +27,19 @@ def test_pruning_experiment_uses_a_single_gpu_and_archives_results():
     assert "scripts/pruning_mode.sh" in pruning_stage
     assert "reports/pruning_experiment.*" in jenkinsfile
     assert "reports/pruning_metrics.png" in jenkinsfile
+
+
+def test_drift_monitoring_uses_a_single_gpu_and_archives_evidence():
+    jenkinsfile = Path("Jenkinsfile").read_text(encoding="utf-8")
+    monitoring_stage = jenkinsfile.split(
+        "stage('Run Drift Monitoring on AI Lab')",
+        maxsplit=1,
+    )[1].split("stage('Prepare Inference Input')", maxsplit=1)[0]
+
+    assert jenkinsfile.count("name: 'RUN_DRIFT_MONITORING'") == 2
+    assert "--nodes=1" in monitoring_stage
+    assert "--gres=gpu:1" in monitoring_stage
+    assert "scripts/evidently_monitoring.py" in monitoring_stage
+    assert "scripts/monitoring_mode.sh" in monitoring_stage
+    assert "reports/evidently/**" in jenkinsfile
+    assert "reports/monitoring-slurm-*.out" in jenkinsfile

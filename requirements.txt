@@ -9,6 +9,7 @@ wandb>=0.17,<1
 psutil>=5.9,<8
 carbontracker>=2.4,<3
 scikit-learn>=1.5,<2
+evidently==0.7.21
 pre-commit>=3.7,<5
 ruff==0.15.14
 pytest>=8.0,<9
